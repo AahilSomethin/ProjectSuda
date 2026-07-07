@@ -73,7 +73,7 @@ export default function TransmissionPopup({
 
   return (
     <div
-      className={`suda-popup${isStatus ? " suda-popup--status" : ""}`}
+      className={`suda-popup suda-popup--embedded${isStatus ? " suda-popup--status" : ""}`}
       role="dialog"
       aria-label={title}
     >

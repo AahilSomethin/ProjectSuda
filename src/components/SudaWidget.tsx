@@ -101,29 +101,6 @@ export default function SudaWidget() {
     }
   }, [settings.personality, showTransmission]);
 
-  // Google Calendar — disabled for now
-  // const handleCheckMeetings = useCallback(async () => {
-  //   setLoading("meetings");
-  //   try {
-  //     const meetings = await fetchUpcomingMeetings();
-  //     if (meetings.length === 0) {
-  //       showTransmission({
-  //         title: "Calendar",
-  //         message: "No upcoming meetings detected.",
-  //         type: "meeting",
-  //         skipIntro: true,
-  //         voiceEnabled: false,
-  //       });
-  //       return;
-  //     }
-  //     const next = meetings[0];
-  //     const summary = await summarizeMeeting(next, settings.personality);
-  //     showTransmission({ title: next.title, message: summary, type: "meeting" });
-  //   } finally {
-  //     setLoading(null);
-  //   }
-  // }, [settings.personality, showTransmission]);
-
   const pollForUpdates = useCallback(async () => {
     const updates = await fetchNewLinearUpdates(seenIdsRef.current);
     if (updates.length === 0) return;
@@ -183,17 +160,7 @@ export default function SudaWidget() {
   return (
     <div className="suda-widget">
       <div className="suda-widget__inner">
-        {isExpanded && transmission.phase !== "idle" && (
-          <TransmissionPopup
-            transmission={transmission}
-            disableText={settings.disableText}
-            onClose={dismissTransmission}
-            onSummarizeTasks={handleSummarizeTasks}
-            tasksLoading={loading === "tasks"}
-          />
-        )}
-
-        <div style={{ position: "relative" }}>
+        <div className="suda-panel">
           {settingsOpen && (
             <SettingsPanel
               settings={settings}
@@ -202,52 +169,64 @@ export default function SudaWidget() {
             />
           )}
 
-          {showCharacter ? (
-            <button
-              type="button"
-              className={`suda-avatar${isTransmitting ? " suda-avatar--active" : " suda-avatar--idle"}`}
-              onClick={handleAvatarClick}
-              aria-label="SUDA companion"
-            >
-              {config.characterGifUrl ? (
-                <img
-                  className="suda-avatar__img"
-                  src={config.characterGifUrl}
-                  alt="SUDA"
-                />
-              ) : (
-                <span className="suda-avatar__fallback">S</span>
-              )}
-              <span className="suda-avatar__pulse" />
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="suda-btn suda-btn--icon"
-              onClick={handleCompanionClick}
-              aria-label="Open SUDA panel"
-            >
-              ◈
-            </button>
-          )}
+          <div className="suda-panel__edge suda-panel__edge--top" aria-hidden="true" />
 
-          <button
-            type="button"
-            className="suda-btn suda-btn--icon"
-            style={
-              showCharacter
-                ? {
-                    position: "absolute",
-                    bottom: "-0.25rem",
-                    left: "-0.25rem",
-                  }
-                : undefined
-            }
-            onClick={() => setSettingsOpen((v) => !v)}
-            aria-label="Settings"
-          >
-            ⚙
-          </button>
+          <div className="suda-panel__content">
+            <div className="suda-panel__visual-wrap">
+              {showCharacter ? (
+                <button
+                  type="button"
+                  className={`suda-panel__visual${isTransmitting ? " suda-panel__visual--transmitting" : ""}`}
+                  onClick={handleAvatarClick}
+                  aria-label="SUDA companion"
+                >
+                  {config.characterGifUrl ? (
+                    <img
+                      className="suda-panel__visual-img"
+                      src={config.characterGifUrl}
+                      alt="SUDA"
+                    />
+                  ) : (
+                    <span className="suda-panel__visual-fallback">S</span>
+                  )}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="suda-panel__visual suda-panel__visual--compact"
+                  onClick={handleCompanionClick}
+                  aria-label="Open SUDA panel"
+                >
+                  ◈
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="suda-panel__settings"
+                onClick={() => setSettingsOpen((v) => !v)}
+                aria-label="Settings"
+              >
+                ⚙
+              </button>
+            </div>
+
+            <span className="suda-panel__label">SUDA</span>
+
+            {isExpanded && transmission.phase !== "idle" && (
+              <div className="suda-panel__body">
+                <TransmissionPopup
+                  transmission={transmission}
+                  disableText={settings.disableText}
+                  onClose={dismissTransmission}
+                  onSummarizeTasks={handleSummarizeTasks}
+                  tasksLoading={loading === "tasks"}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="suda-panel__edge suda-panel__edge--bottom" aria-hidden="true" />
         </div>
       </div>
     </div>
