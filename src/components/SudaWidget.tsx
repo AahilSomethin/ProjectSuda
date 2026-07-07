@@ -214,15 +214,12 @@ export default function SudaWidget() {
             <span className="suda-panel__label">SUDA</span>
 
             {isExpanded && transmission.phase !== "idle" && (
-              <div className="suda-panel__body">
-                <TransmissionPopup
-                  transmission={transmission}
-                  disableText={settings.disableText}
-                  onClose={dismissTransmission}
-                  onSummarizeTasks={handleSummarizeTasks}
-                  tasksLoading={loading === "tasks"}
-                />
-              </div>
+              <TransmissionPopup
+                transmission={transmission}
+                disableText={settings.disableText}
+                onSummarizeTasks={handleSummarizeTasks}
+                tasksLoading={loading === "tasks"}
+              />
             )}
           </div>
 

@@ -4,13 +4,8 @@ import type { ActiveTransmission, TransmissionPhase } from "../types";
 interface TransmissionPopupProps {
   transmission: ActiveTransmission;
   disableText: boolean;
-  onClose: () => void;
   onSummarizeTasks?: () => void;
   tasksLoading?: boolean;
-}
-
-function TypeBadge({ type }: { type: ActiveTransmission["type"] }) {
-  return <span className="suda-popup__badge">{type}</span>;
 }
 
 function IntroPhase() {
@@ -61,11 +56,10 @@ function MessagePhase({
 export default function TransmissionPopup({
   transmission,
   disableText,
-  onClose,
   onSummarizeTasks,
   tasksLoading,
 }: TransmissionPopupProps) {
-  const { phase, title, message, type, skipIntro, showActions } = transmission;
+  const { phase, message, skipIntro, showActions } = transmission;
 
   if (phase === "idle") return null;
 
@@ -74,21 +68,10 @@ export default function TransmissionPopup({
   return (
     <div
       className={`suda-popup suda-popup--embedded${isStatus ? " suda-popup--status" : ""}`}
-      role="dialog"
-      aria-label={title}
+      role="region"
+      aria-label="SUDA transmission"
     >
-      <div className="suda-popup__header">
-        <h2 className="suda-popup__title">{title}</h2>
-        {!isStatus && <TypeBadge type={type} />}
-        <button
-          className="suda-popup__close"
-          onClick={onClose}
-          aria-label="Close transmission"
-        >
-          ×
-        </button>
-      </div>
-      <div className="suda-popup__body">
+      <div className="suda-popup__body" aria-live="polite">
         {phase === "intro" ? (
           <IntroPhase />
         ) : (
