@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { config } from "../config";
+import { useTypewriterText } from "../hooks/useTypewriterText";
 import type { ActiveTransmission, TransmissionPhase } from "../types";
 
 const LINES_PER_PAGE = 5;
@@ -44,6 +45,9 @@ function IntroPhase() {
   );
 }
 
+const AUTO_ADVANCE_DELAY_MS = 900;
+const AUTO_ADVANCE_DELAY_REDUCED_MS = 1200;
+
 function MessagePhase({
   message,
   disableText,
@@ -67,6 +71,31 @@ function MessagePhase({
     }
   }, [currentPage, totalPages]);
 
+  const visibleChunk = chunks[currentPage] ?? chunks[0];
+  const { displayedText, isTyping, reducedMotion } = useTypewriterText(
+    visibleChunk,
+    !disableText,
+  );
+
+  const chunkComplete =
+    !disableText && !isTyping && displayedText === visibleChunk;
+
+  useEffect(() => {
+    if (!chunkComplete || totalPages <= 1 || currentPage >= totalPages - 1) {
+      return;
+    }
+
+    const delayMs = reducedMotion
+      ? AUTO_ADVANCE_DELAY_REDUCED_MS
+      : AUTO_ADVANCE_DELAY_MS;
+
+    const timeoutId = window.setTimeout(() => {
+      setCurrentPage((p) => p + 1);
+    }, delayMs);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [chunkComplete, totalPages, currentPage, reducedMotion]);
+
   if (disableText) {
     return (
       <p className="suda-popup__message" style={{ fontStyle: "italic" }}>
@@ -75,42 +104,13 @@ function MessagePhase({
     );
   }
 
-  const visibleChunk = chunks[currentPage] ?? chunks[0];
-
   return (
-    <>
-      <p
-        className={`suda-popup__message${isStatus ? " suda-popup__message--status" : ""}`}
-        aria-live="polite"
-      >
-        {visibleChunk}
-      </p>
-      {totalPages > 1 && (
-        <div className="suda-popup__pager">
-          <button
-            type="button"
-            className="suda-popup__pager-btn"
-            disabled={currentPage === 0}
-            onClick={() => setCurrentPage((p) => p - 1)}
-            aria-label="Previous transmission"
-          >
-            ‹
-          </button>
-          <span className="suda-popup__pager-indicator">
-            {currentPage + 1}/{totalPages}
-          </span>
-          <button
-            type="button"
-            className="suda-popup__pager-btn"
-            disabled={currentPage === totalPages - 1}
-            onClick={() => setCurrentPage((p) => p + 1)}
-            aria-label="Next transmission"
-          >
-            ›
-          </button>
-        </div>
-      )}
-    </>
+    <p
+      className={`suda-popup__message${isStatus ? " suda-popup__message--status" : ""}${isTyping ? " suda-popup__message--typing" : ""}`}
+      aria-live="polite"
+    >
+      {displayedText}
+    </p>
   );
 }
 

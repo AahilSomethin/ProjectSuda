@@ -169,6 +169,7 @@
   bottom: 0.75rem;
   left: 0.85rem;
   z-index: 2;
+  font-family: var(--font-hud-label);
   font-size: 0.875rem;
   font-weight: 800;
   letter-spacing: 0.16em;
@@ -184,12 +185,13 @@
   margin-top: 0.25rem;
   max-height: min(14rem, 50dvh);
   overflow-y: auto;
+  font-family: var(--font-ui);
 }
 
 /* ── Buttons ── */
 
 .suda-btn {
-  font-family: inherit;
+  font-family: var(--font-ui);
   font-size: 0.75rem;
   font-weight: 500;
   padding: 0.375rem 0.625rem;
@@ -386,6 +388,7 @@
 }
 
 .suda-popup__message {
+  font-family: var(--font-ui);
   font-size: 0.8125rem;
   line-height: 1.5;
   color: var(--text-primary);
@@ -396,44 +399,25 @@
   overflow: hidden;
 }
 
-.suda-popup__pager {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.375rem;
-  margin-top: 0.375rem;
-  flex-shrink: 0;
+.suda-popup__message--typing::after {
+  content: "";
+  display: inline-block;
+  width: 0.125rem;
+  height: 1em;
+  margin-left: 1px;
+  background: var(--label-cyan);
+  vertical-align: text-bottom;
+  animation: suda-caret-blink 1s step-end infinite;
 }
 
-.suda-popup__pager-btn {
-  font-family: inherit;
-  font-size: 0.875rem;
-  padding: 0.125rem 0.375rem;
-  border: 1px solid var(--border-soft);
-  background: transparent;
-  color: var(--text-secondary);
-  border-radius: 0.25rem;
-  cursor: pointer;
-  line-height: 1;
-  transition: color 0.2s, border-color 0.2s;
-}
-
-.suda-popup__pager-btn:hover:not(:disabled) {
-  color: var(--text-primary);
-  border-color: var(--accent-silver-soft);
-}
-
-.suda-popup__pager-btn:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-
-.suda-popup__pager-indicator {
-  font-size: 0.625rem;
-  color: var(--text-secondary);
-  letter-spacing: 0.05em;
-  min-width: 2rem;
-  text-align: center;
+@keyframes suda-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 
 /* ── Settings ── */
@@ -446,6 +430,7 @@
   max-height: min(20rem, 60dvh);
   display: flex;
   flex-direction: column;
+  font-family: var(--font-ui);
   border-radius: 0.375rem;
   border: 1px solid var(--accent-silver-soft);
   background: var(--surface);
@@ -553,5 +538,9 @@
 
   .suda-popup__loading {
     animation: none;
+  }
+
+  .suda-popup__message--typing::after {
+    display: none;
   }
 }

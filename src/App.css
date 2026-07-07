@@ -22,8 +22,10 @@
   --danger: #ff6b8a;
   --danger-border: rgba(255, 107, 138, 0.35);
   --danger-glow: rgba(255, 107, 138, 0.3);
+  --font-hud-label: "Geist Pixel", monospace;
+  --font-ui: Inter, system-ui, -apple-system, sans-serif;
 
-  font-family: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-ui);
   font-size: 16px;
   line-height: 1.5;
   font-weight: 400;
