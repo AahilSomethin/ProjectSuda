@@ -201,6 +201,9 @@ export default function SudaWidget() {
                 </button>
               )}
 
+              <div className="suda-panel__visual-shade" aria-hidden="true" />
+              <span className="suda-panel__label">SUDA</span>
+
               <button
                 type="button"
                 className="suda-panel__settings"
@@ -210,8 +213,6 @@ export default function SudaWidget() {
                 ⚙
               </button>
             </div>
-
-            <span className="suda-panel__label">SUDA</span>
 
             {isExpanded && transmission.phase !== "idle" && (
               <TransmissionPopup
