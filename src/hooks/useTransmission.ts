@@ -41,15 +41,22 @@ export function useTransmission(settings: WidgetSettings) {
     (payload: TransmissionPayload) => {
       clearIntroTimer();
 
+      const skipIntro = payload.skipIntro ?? false;
+      const voiceEnabled = payload.voiceEnabled ?? !skipIntro;
+
       const active: ActiveTransmission = {
         ...payload,
-        voiceEnabled: payload.voiceEnabled ?? true,
+        skipIntro,
+        voiceEnabled,
         characterVisible: payload.characterVisible ?? true,
-        phase: "intro",
+        showActions: payload.showActions ?? false,
+        phase: skipIntro ? "message" : "intro",
       };
 
       setTransmission(active);
       setIsExpanded(true);
+
+      if (skipIntro) return;
 
       introTimerRef.current = setTimeout(() => {
         setTransmission((prev) => {
@@ -57,7 +64,7 @@ export function useTransmission(settings: WidgetSettings) {
           return { ...prev, phase: "message" };
         });
 
-        if (active.voiceEnabled && !settings.muteVoice) {
+        if (voiceEnabled && !settings.muteVoice) {
           speakText(active.message);
         }
       }, config.transmissionIntroMs);

@@ -48,6 +48,10 @@ export interface TransmissionPayload {
   type: TransmissionType;
   voiceEnabled?: boolean;
   characterVisible?: boolean;
+  /** Skip the 3s GIF intro — used for idle/empty status messages */
+  skipIntro?: boolean;
+  /** Show action buttons in the status popup (e.g. Summarize Tasks) */
+  showActions?: boolean;
 }
 
 export interface WidgetSettings {

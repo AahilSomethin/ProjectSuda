@@ -1,4 +1,5 @@
-import { config } from "../config";
+// Voice reads the exact final message SUDA displays — it does not rewrite or summarize.
+// The AI service (aiSummary.ts) decides what SUDA says; this module only speaks it.
 
 let voiceMuted = false;
 
@@ -13,24 +14,9 @@ export function isVoiceMuted(): boolean {
   return voiceMuted;
 }
 
-async function speakWithElevenLabs(_text: string): Promise<void> {
-  // TODO: Integrate ElevenLabs TTS API
-  // const response = await fetch(
-  //   `https://api.elevenlabs.io/v1/text-to-speech/${config.elevenLabsVoiceId}`,
-  //   {
-  //     method: "POST",
-  //     headers: {
-  //       "xi-api-key": config.elevenLabsApiKey,
-  //       "Content-Type": "application/json",
-  //     },
-  //     body: JSON.stringify({ text, model_id: "eleven_monolingual_v1" }),
-  //   },
-  // );
-  // const audioBlob = await response.blob();
-  // const audio = new Audio(URL.createObjectURL(audioBlob));
-  // await audio.play();
-  throw new Error("ElevenLabs API not yet implemented");
-}
+// TODO: Integrate ElevenLabs TTS API for higher-quality voice output.
+// When added, speak the exact `text` argument — do not modify it before playback.
+// async function speakWithElevenLabs(text: string): Promise<void> { ... }
 
 function speakWithBrowser(text: string): void {
   if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -45,14 +31,6 @@ function speakWithBrowser(text: string): void {
 export async function speakText(text: string): Promise<void> {
   if (voiceMuted || !text.trim()) return;
 
-  if (config.elevenLabsApiKey && config.elevenLabsVoiceId) {
-    try {
-      await speakWithElevenLabs(text);
-      return;
-    } catch {
-      // Fall through to browser TTS
-    }
-  }
-
+  // MVP: speak the exact message via browser TTS
   speakWithBrowser(text);
 }

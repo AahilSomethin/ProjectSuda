@@ -5,6 +5,8 @@ interface TransmissionPopupProps {
   transmission: ActiveTransmission;
   disableText: boolean;
   onClose: () => void;
+  onSummarizeTasks?: () => void;
+  tasksLoading?: boolean;
 }
 
 function TypeBadge({ type }: { type: ActiveTransmission["type"] }) {
@@ -33,9 +35,11 @@ function IntroPhase() {
 function MessagePhase({
   message,
   disableText,
+  isStatus,
 }: {
   message: string;
   disableText: boolean;
+  isStatus: boolean;
 }) {
   if (disableText) {
     return (
@@ -45,23 +49,37 @@ function MessagePhase({
     );
   }
 
-  return <p className="suda-popup__message">{message}</p>;
+  return (
+    <p
+      className={`suda-popup__message${isStatus ? " suda-popup__message--status" : ""}`}
+    >
+      {message}
+    </p>
+  );
 }
 
 export default function TransmissionPopup({
   transmission,
   disableText,
   onClose,
+  onSummarizeTasks,
+  tasksLoading,
 }: TransmissionPopupProps) {
-  const { phase, title, message, type } = transmission;
+  const { phase, title, message, type, skipIntro, showActions } = transmission;
 
   if (phase === "idle") return null;
 
+  const isStatus = skipIntro ?? false;
+
   return (
-    <div className="suda-popup" role="dialog" aria-label={title}>
+    <div
+      className={`suda-popup${isStatus ? " suda-popup--status" : ""}`}
+      role="dialog"
+      aria-label={title}
+    >
       <div className="suda-popup__header">
         <h2 className="suda-popup__title">{title}</h2>
-        <TypeBadge type={type} />
+        {!isStatus && <TypeBadge type={type} />}
         <button
           className="suda-popup__close"
           onClick={onClose}
@@ -74,9 +92,25 @@ export default function TransmissionPopup({
         {phase === "intro" ? (
           <IntroPhase />
         ) : (
-          <MessagePhase message={message} disableText={disableText} />
+          <MessagePhase
+            message={message}
+            disableText={disableText}
+            isStatus={isStatus}
+          />
         )}
       </div>
+      {showActions && onSummarizeTasks && (
+        <div className="suda-popup__footer">
+          <button
+            type="button"
+            className="suda-btn"
+            disabled={tasksLoading}
+            onClick={onSummarizeTasks}
+          >
+            {tasksLoading ? "Loading..." : "Summarize Tasks"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

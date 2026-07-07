@@ -3,11 +3,7 @@ import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/
 import { config } from "../config";
 import { useSettings } from "../hooks/useSettings";
 import { useTransmission } from "../hooks/useTransmission";
-import {
-  summarizeMeeting,
-  summarizeTasks,
-} from "../services/aiSummary";
-import { fetchUpcomingMeetings } from "../services/googleCalendar";
+import { summarizeTasks } from "../services/aiSummary";
 import {
   fetchIncompleteLinearTasks,
   fetchNewLinearUpdates,
@@ -17,6 +13,9 @@ import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
 
 const SEEN_TASKS_KEY = "suda-seen-task-ids";
+
+const IDLE_MESSAGE = "SUDA online. No active transmission.";
+const EMPTY_TASKS_MESSAGE = "All clear. No incomplete Linear tasks found.";
 
 function loadSeenIds(): Set<string> {
   try {
@@ -56,7 +55,6 @@ export default function SudaWidget() {
   const {
     transmission,
     isExpanded,
-    setIsExpanded,
     showTransmission,
     dismissTransmission,
   } = useTransmission(settings);
@@ -66,6 +64,10 @@ export default function SudaWidget() {
   const seenIdsRef = useRef<Set<string>>(loadSeenIds());
   const pollInitializedRef = useRef(false);
 
+  const isTransmitting =
+    transmission.phase === "intro" ||
+    (transmission.phase === "message" && !transmission.skipIntro);
+
   useEffect(() => {
     positionWindowRightMiddle();
   }, []);
@@ -74,6 +76,18 @@ export default function SudaWidget() {
     setLoading("tasks");
     try {
       const tasks = await fetchIncompleteLinearTasks();
+
+      if (tasks.length === 0) {
+        showTransmission({
+          title: "Tasks",
+          message: EMPTY_TASKS_MESSAGE,
+          type: "task",
+          skipIntro: true,
+          voiceEnabled: false,
+        });
+        return;
+      }
+
       const summary = await summarizeTasks(tasks, settings.personality);
       showTransmission({
         title: "Task Summary",
@@ -87,30 +101,28 @@ export default function SudaWidget() {
     }
   }, [settings.personality, showTransmission]);
 
-  const handleCheckMeetings = useCallback(async () => {
-    setLoading("meetings");
-    try {
-      const meetings = await fetchUpcomingMeetings();
-      if (meetings.length === 0) {
-        showTransmission({
-          title: "No Meetings",
-          message: "No upcoming meetings on your calendar.",
-          type: "meeting",
-        });
-        return;
-      }
-
-      const next = meetings[0];
-      const summary = await summarizeMeeting(next, settings.personality);
-      showTransmission({
-        title: next.title,
-        message: summary,
-        type: "meeting",
-      });
-    } finally {
-      setLoading(null);
-    }
-  }, [settings.personality, showTransmission]);
+  // Google Calendar — disabled for now
+  // const handleCheckMeetings = useCallback(async () => {
+  //   setLoading("meetings");
+  //   try {
+  //     const meetings = await fetchUpcomingMeetings();
+  //     if (meetings.length === 0) {
+  //       showTransmission({
+  //         title: "Calendar",
+  //         message: "No upcoming meetings detected.",
+  //         type: "meeting",
+  //         skipIntro: true,
+  //         voiceEnabled: false,
+  //       });
+  //       return;
+  //     }
+  //     const next = meetings[0];
+  //     const summary = await summarizeMeeting(next, settings.personality);
+  //     showTransmission({ title: next.title, message: summary, type: "meeting" });
+  //   } finally {
+  //     setLoading(null);
+  //   }
+  // }, [settings.personality, showTransmission]);
 
   const pollForUpdates = useCallback(async () => {
     const updates = await fetchNewLinearUpdates(seenIdsRef.current);
@@ -147,9 +159,17 @@ export default function SudaWidget() {
   const handleAvatarClick = () => {
     if (isExpanded) {
       dismissTransmission();
-    } else {
-      setIsExpanded(true);
+      return;
     }
+
+    showTransmission({
+      title: "SUDA",
+      message: IDLE_MESSAGE,
+      type: "info",
+      skipIntro: true,
+      voiceEnabled: false,
+      showActions: true,
+    });
   };
 
   const handleCompanionClick = () => {
@@ -168,30 +188,9 @@ export default function SudaWidget() {
             transmission={transmission}
             disableText={settings.disableText}
             onClose={dismissTransmission}
+            onSummarizeTasks={handleSummarizeTasks}
+            tasksLoading={loading === "tasks"}
           />
-        )}
-
-        {isExpanded && transmission.phase === "idle" && (
-          <div className="suda-widget__actions">
-            <div className="suda-widget__action-row">
-              <button
-                type="button"
-                className="suda-btn"
-                disabled={loading === "tasks"}
-                onClick={handleSummarizeTasks}
-              >
-                {loading === "tasks" ? "Loading..." : "Summarize Tasks"}
-              </button>
-              <button
-                type="button"
-                className="suda-btn"
-                disabled={loading === "meetings"}
-                onClick={handleCheckMeetings}
-              >
-                {loading === "meetings" ? "Loading..." : "Check Meetings"}
-              </button>
-            </div>
-          </div>
         )}
 
         <div style={{ position: "relative" }}>
@@ -206,7 +205,7 @@ export default function SudaWidget() {
           {showCharacter ? (
             <button
               type="button"
-              className={`suda-avatar${isExpanded ? " suda-avatar--active" : ""}`}
+              className={`suda-avatar${isTransmitting ? " suda-avatar--active" : " suda-avatar--idle"}`}
               onClick={handleAvatarClick}
               aria-label="SUDA companion"
             >
