@@ -8,8 +8,6 @@ export const config = {
   googleCalendarEnabled: false,
   openaiApiKey: import.meta.env.VITE_OPENAI_API_KEY ?? "",
   openaiModel: import.meta.env.VITE_OPENAI_MODEL ?? "gpt-4o-mini",
-  elevenLabsApiKey: import.meta.env.VITE_ELEVENLABS_API_KEY ?? "",
-  elevenLabsVoiceId: import.meta.env.VITE_ELEVENLABS_VOICE_ID ?? "",
   transmissionIntroMs: 3000,
   linearPollIntervalMs: 60_000,
 };

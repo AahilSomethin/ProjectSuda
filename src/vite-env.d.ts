@@ -8,8 +8,6 @@ interface ImportMetaEnv {
   // readonly VITE_GOOGLE_CALENDAR_ID: string;
   readonly VITE_OPENAI_API_KEY: string;
   readonly VITE_OPENAI_MODEL: string;
-  readonly VITE_ELEVENLABS_API_KEY: string;
-  readonly VITE_ELEVENLABS_VOICE_ID: string;
 }
 
 interface ImportMeta {

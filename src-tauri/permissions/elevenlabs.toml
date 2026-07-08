@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "elevenlabs-tts"
+description = "Allows ElevenLabs text-to-speech commands"
+commands.allow = ["elevenlabs_tts", "elevenlabs_configured"]
