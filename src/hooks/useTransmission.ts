@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { config } from "../config";
-import { muteVoice, speakText } from "../services/voice";
+import { cancelSpeech, muteVoice } from "../services/voice";
 import type {
   ActiveTransmission,
   TransmissionPayload,
@@ -33,6 +33,7 @@ export function useTransmission(settings: WidgetSettings) {
 
   const dismissTransmission = useCallback(() => {
     clearIntroTimer();
+    cancelSpeech();
     setTransmission(IDLE_TRANSMISSION);
     setIsExpanded(false);
   }, [clearIntroTimer]);
@@ -40,6 +41,7 @@ export function useTransmission(settings: WidgetSettings) {
   const showTransmission = useCallback(
     (payload: TransmissionPayload) => {
       clearIntroTimer();
+      cancelSpeech();
 
       const skipIntro = payload.skipIntro ?? false;
       const voiceEnabled = payload.voiceEnabled ?? !skipIntro;
@@ -63,13 +65,9 @@ export function useTransmission(settings: WidgetSettings) {
           if (prev.phase !== "intro") return prev;
           return { ...prev, phase: "message" };
         });
-
-        if (voiceEnabled && !settings.muteVoice) {
-          speakText(active.message);
-        }
       }, config.transmissionIntroMs);
     },
-    [clearIntroTimer, settings.muteVoice],
+    [clearIntroTimer],
   );
 
   useEffect(() => {

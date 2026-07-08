@@ -1,12 +1,18 @@
-// Voice reads the exact final message SUDA displays — it does not rewrite or summarize.
+// Voice reads the exact chunk SUDA displays — it does not rewrite or summarize.
 // The AI service (aiSummary.ts) decides what SUDA says; this module only speaks it.
 
 let voiceMuted = false;
+let activeCancel: (() => void) | null = null;
+
+export interface VoiceCallbacks {
+  onStart?: () => void;
+  onEnd?: () => void;
+}
 
 export function muteVoice(muted: boolean): void {
   voiceMuted = muted;
-  if (muted && typeof window !== "undefined" && window.speechSynthesis) {
-    window.speechSynthesis.cancel();
+  if (muted) {
+    cancelSpeech();
   }
 }
 
@@ -14,23 +20,63 @@ export function isVoiceMuted(): boolean {
   return voiceMuted;
 }
 
+export function cancelSpeech(): void {
+  if (activeCancel) {
+    activeCancel();
+    activeCancel = null;
+  }
+  if (typeof window !== "undefined" && window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+}
+
+function isSpeechAvailable(): boolean {
+  return typeof window !== "undefined" && !!window.speechSynthesis;
+}
+
 // TODO: Integrate ElevenLabs TTS API for higher-quality voice output.
 // When added, speak the exact `text` argument — do not modify it before playback.
-// async function speakWithElevenLabs(text: string): Promise<void> { ... }
+// async function speakWithElevenLabs(text: string, callbacks?: VoiceCallbacks): Promise<void> { ... }
 
-function speakWithBrowser(text: string): void {
-  if (typeof window === "undefined" || !window.speechSynthesis) return;
+function speakWithBrowser(text: string, callbacks?: VoiceCallbacks): void {
+  if (!isSpeechAvailable()) {
+    callbacks?.onEnd?.();
+    return;
+  }
 
-  window.speechSynthesis.cancel();
+  cancelSpeech();
+
+  let settled = false;
+  const finish = () => {
+    if (settled) return;
+    settled = true;
+    activeCancel = null;
+    callbacks?.onEnd?.();
+  };
+
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 1;
   utterance.pitch = 1;
+
+  utterance.onstart = () => {
+    if (!settled) callbacks?.onStart?.();
+  };
+  utterance.onend = finish;
+  utterance.onerror = finish;
+
+  activeCancel = () => {
+    settled = true;
+    activeCancel = null;
+  };
+
   window.speechSynthesis.speak(utterance);
 }
 
-export async function speakText(text: string): Promise<void> {
-  if (voiceMuted || !text.trim()) return;
+export function speakText(text: string, callbacks?: VoiceCallbacks): void {
+  if (voiceMuted || !text.trim()) {
+    callbacks?.onEnd?.();
+    return;
+  }
 
-  // MVP: speak the exact message via browser TTS
-  speakWithBrowser(text);
+  speakWithBrowser(text, callbacks);
 }

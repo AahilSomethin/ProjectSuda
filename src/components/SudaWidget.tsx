@@ -218,6 +218,7 @@ export default function SudaWidget() {
               <TransmissionPopup
                 transmission={transmission}
                 disableText={settings.disableText}
+                muteVoice={settings.muteVoice}
                 onSummarizeTasks={handleSummarizeTasks}
                 tasksLoading={loading === "tasks"}
               />

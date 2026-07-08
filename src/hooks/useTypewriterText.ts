@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
-const CHAR_DELAY_MS = 16;
+const DEFAULT_CHAR_DELAY_MS = 28;
+const VOICE_OFF_CHAR_DELAY_MS = 22;
 
 function getPrefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
@@ -10,7 +11,18 @@ function getPrefersReducedMotion(): boolean {
 export function useTypewriterText(
   fullText: string,
   enabled: boolean,
-): { displayedText: string; isTyping: boolean; reducedMotion: boolean } {
+  options?: { voiceActive?: boolean },
+): {
+  displayedText: string;
+  isTyping: boolean;
+  isComplete: boolean;
+  reducedMotion: boolean;
+} {
+  const voiceActive = options?.voiceActive ?? false;
+  const charDelayMs = voiceActive
+    ? DEFAULT_CHAR_DELAY_MS
+    : VOICE_OFF_CHAR_DELAY_MS;
+
   const [displayedText, setDisplayedText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(getPrefersReducedMotion);
@@ -41,10 +53,13 @@ export function useTypewriterText(
         window.clearInterval(intervalId);
         setIsTyping(false);
       }
-    }, CHAR_DELAY_MS);
+    }, charDelayMs);
 
     return () => window.clearInterval(intervalId);
-  }, [fullText, enabled, reducedMotion]);
+  }, [fullText, enabled, reducedMotion, charDelayMs]);
 
-  return { displayedText, isTyping, reducedMotion };
+  const isComplete =
+    !enabled || reducedMotion || (!isTyping && displayedText === fullText);
+
+  return { displayedText, isTyping, isComplete, reducedMotion };
 }
