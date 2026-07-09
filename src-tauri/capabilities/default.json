@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "briefing",
     "elevenlabs-tts",
     "opener:default",
     "core:window:allow-close",

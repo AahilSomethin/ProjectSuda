@@ -1,3 +1,4 @@
+mod briefing;
 mod elevenlabs;
 
 fn load_env() {
@@ -20,6 +21,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            briefing::linear_briefing,
+            briefing::linear_briefing_configured,
             elevenlabs::elevenlabs_tts,
             elevenlabs::elevenlabs_configured,
         ])
