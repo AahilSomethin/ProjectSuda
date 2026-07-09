@@ -9,6 +9,11 @@ let activeCancel: (() => void) | null = null;
 let configMissingWarningShown = false;
 let diagnosticsLogged = false;
 let lastVoiceProvider: "elevenlabs" | "browser" | null = null;
+let audioPlaybackUnlocked = false;
+
+// Minimal silent WAV — primes WebView autoplay during a user gesture.
+const SILENT_AUDIO_DATA_URI =
+  "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
 
 export interface VoiceCallbacks {
   onStart?: () => void;
@@ -31,6 +36,81 @@ function isTauriInvokeAvailable(): boolean {
 
 function isSpeechAvailable(): boolean {
   return typeof window !== "undefined" && !!window.speechSynthesis;
+}
+
+let browserVoicesPromise: Promise<SpeechSynthesisVoice[]> | null = null;
+
+function loadBrowserVoices(): Promise<SpeechSynthesisVoice[]> {
+  if (!isSpeechAvailable()) {
+    return Promise.resolve([]);
+  }
+
+  if (browserVoicesPromise) {
+    return browserVoicesPromise;
+  }
+
+  browserVoicesPromise = new Promise((resolve) => {
+    const synth = window.speechSynthesis;
+    const finish = () => {
+      const voices = synth.getVoices();
+      resolve(voices);
+      return voices.length > 0;
+    };
+
+    if (finish()) return;
+
+    const onVoicesChanged = () => {
+      if (finish()) {
+        synth.removeEventListener("voiceschanged", onVoicesChanged);
+      }
+    };
+
+    synth.addEventListener("voiceschanged", onVoicesChanged);
+    synth.getVoices();
+
+    window.setTimeout(() => {
+      synth.removeEventListener("voiceschanged", onVoicesChanged);
+      resolve(synth.getVoices());
+    }, 1500);
+  });
+
+  return browserVoicesPromise;
+}
+
+function pickBrowserVoice(
+  voices: SpeechSynthesisVoice[],
+): SpeechSynthesisVoice | undefined {
+  if (voices.length === 0) return undefined;
+
+  const english = voices.filter((voice) =>
+    voice.lang.toLowerCase().startsWith("en"),
+  );
+  const pool = english.length > 0 ? english : voices;
+
+  return (
+    pool.find(
+      (voice) => voice.lang.toLowerCase() === "en-us" && voice.localService,
+    ) ??
+    pool.find((voice) => voice.localService) ??
+    pool[0] ??
+    voices[0]
+  );
+}
+
+function primeBrowserSpeech(): void {
+  if (!isSpeechAvailable()) return;
+
+  const synth = window.speechSynthesis;
+  if (synth.paused) {
+    synth.resume();
+  }
+
+  void loadBrowserVoices();
+}
+
+/** Preload system voices so the browser fallback is ready when ElevenLabs fails. */
+export function primeBrowserSpeechForFallback(): void {
+  primeBrowserSpeech();
 }
 
 function logElevenLabsFailure(reason: string, dedupe = false): void {
@@ -91,10 +171,15 @@ export async function debugVoiceStatus(): Promise<void> {
     }
   }
 
+  const voices = await loadBrowserVoices();
+
   console.info("[SUDA] Voice debug status", {
     tauriInvokeAvailable,
     elevenLabsConfigured,
     speechSynthesisAvailable: isSpeechAvailable(),
+    browserVoicesAvailable: voices.length,
+    browserVoiceSelected: pickBrowserVoice(voices)?.name ?? null,
+    audioPlaybackUnlocked,
     lastVoiceProvider,
     fallbackUsed: lastVoiceProvider === "browser",
   });
@@ -109,6 +194,44 @@ export function muteVoice(muted: boolean): void {
 
 export function isVoiceMuted(): boolean {
   return voiceMuted;
+}
+
+/**
+ * Call during a user gesture (click/tap) so later async TTS playback is allowed.
+ * WebView blocks audio.play() after ElevenLabs network latency without this.
+ */
+export async function unlockAudioPlayback(): Promise<boolean> {
+  if (audioPlaybackUnlocked || typeof Audio === "undefined") {
+    return audioPlaybackUnlocked;
+  }
+
+  const audio = new Audio(SILENT_AUDIO_DATA_URI);
+  audio.volume = 0.001;
+
+  try {
+    await audio.play();
+    audio.pause();
+    audio.src = "";
+    audioPlaybackUnlocked = true;
+    primeBrowserSpeech();
+
+    if (isDev()) {
+      console.info("[SUDA] Audio playback unlocked");
+    }
+
+    return true;
+  } catch (error) {
+    if (isDev()) {
+      const reason =
+        error instanceof Error ? error.message : "autoplay blocked";
+      console.warn(`[SUDA] Audio unlock failed: ${reason}`);
+    }
+    return false;
+  }
+}
+
+export function isAudioPlaybackUnlocked(): boolean {
+  return audioPlaybackUnlocked;
 }
 
 export function cancelSpeech(): void {
@@ -130,6 +253,9 @@ function speakWithBrowser(
   generation?: number,
 ): void {
   if (!isSpeechAvailable()) {
+    if (isDev()) {
+      console.warn("[SUDA] Browser speechSynthesis is not available");
+    }
     callbacks?.onEnd?.();
     return;
   }
@@ -138,34 +264,88 @@ function speakWithBrowser(
     return;
   }
 
-  logVoiceProvider("browser");
-
-  let settled = false;
-  const finish = () => {
-    if (settled) return;
-    settled = true;
-    activeCancel = null;
-    callbacks?.onEnd?.();
-  };
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1;
-  utterance.pitch = 1;
-
-  utterance.onstart = () => {
-    if (!settled && generation === speakGeneration) {
-      callbacks?.onStart?.();
+  void (async () => {
+    if (!audioPlaybackUnlocked) {
+      await unlockAudioPlayback();
     }
-  };
-  utterance.onend = finish;
-  utterance.onerror = finish;
 
-  activeCancel = () => {
-    settled = true;
-    activeCancel = null;
-  };
+    if (generation !== undefined && generation !== speakGeneration) {
+      return;
+    }
 
-  window.speechSynthesis.speak(utterance);
+    const voices = await loadBrowserVoices();
+    if (generation !== undefined && generation !== speakGeneration) {
+      return;
+    }
+
+    logVoiceProvider("browser");
+
+    if (isDev()) {
+      const selected = pickBrowserVoice(voices);
+      console.info("[SUDA] Browser voice fallback", {
+        voicesAvailable: voices.length,
+        selectedVoice: selected?.name ?? "default",
+        selectedLang: selected?.lang ?? "default",
+      });
+    }
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      activeCancel = null;
+      callbacks?.onEnd?.();
+    };
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+
+    const selectedVoice = pickBrowserVoice(voices);
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+      utterance.lang = selectedVoice.lang;
+    }
+
+    utterance.onstart = () => {
+      if (!settled && generation === speakGeneration) {
+        callbacks?.onStart?.();
+      }
+    };
+    utterance.onend = finish;
+    utterance.onerror = (event) => {
+      if (isDev()) {
+        console.warn(
+          `[SUDA] Browser speechSynthesis error: ${event.error || "unknown"}`,
+        );
+      }
+      finish();
+    };
+
+    activeCancel = () => {
+      settled = true;
+      window.speechSynthesis.cancel();
+      activeCancel = null;
+    };
+
+    const synth = window.speechSynthesis;
+    synth.cancel();
+
+    // WebView/Chromium often drops speak() if called immediately after cancel().
+    window.setTimeout(() => {
+      if (generation !== undefined && generation !== speakGeneration) {
+        return;
+      }
+      if (settled) return;
+
+      if (synth.paused) {
+        synth.resume();
+      }
+
+      synth.speak(utterance);
+    }, 50);
+  })();
 }
 
 async function isElevenLabsConfigured(): Promise<boolean> {
@@ -261,6 +441,14 @@ async function speakWithElevenLabs(
     activeCancel = null;
   };
 
+  if (!audioPlaybackUnlocked) {
+    await unlockAudioPlayback();
+  }
+
+  if (settled) {
+    return true;
+  }
+
   try {
     await audio.play();
   } catch (error) {
@@ -270,8 +458,12 @@ async function speakWithElevenLabs(
 
     const reason =
       error instanceof Error ? error.message : "Audio playback failed";
-    logElevenLabsFailure(`Audio playback failed: ${reason}`);
-    return false;
+    const hint = reason.toLowerCase().includes("notallowed")
+      ? " — click SUDA once to allow audio"
+      : "";
+    logElevenLabsFailure(`Audio playback failed: ${reason}${hint}`);
+    speakWithBrowser(text, callbacks, generation);
+    return true;
   }
 
   if (generation !== undefined && generation !== speakGeneration) {

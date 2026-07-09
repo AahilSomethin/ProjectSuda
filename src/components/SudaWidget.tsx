@@ -6,6 +6,10 @@ import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
 import { getSudaActivityState } from "../lib/sudaState";
 import {
+  primeBrowserSpeechForFallback,
+  unlockAudioPlayback,
+} from "../services/voice";
+import {
   createBriefingErrorPayload,
   createBriefingPayload,
   createCheckingLinearPayload,
@@ -85,6 +89,7 @@ export default function SudaWidget() {
 
   useEffect(() => {
     positionWindowRightMiddle();
+    primeBrowserSpeechForFallback();
   }, []);
 
   const showBriefing = useCallback(
@@ -98,6 +103,7 @@ export default function SudaWidget() {
   );
 
   const refreshBriefing = useCallback(async () => {
+    void unlockAudioPlayback();
     showTransmission(createCheckingLinearPayload());
     const { briefing: result, error } = await loadBriefing();
     if (result) {
@@ -129,6 +135,8 @@ export default function SudaWidget() {
     (transmission.characterVisible ?? true);
 
   const handleAvatarClick = () => {
+    void unlockAudioPlayback();
+
     if (isExpanded) {
       dismissTransmission();
       return;
@@ -150,6 +158,8 @@ export default function SudaWidget() {
   };
 
   const handleCompanionClick = () => {
+    void unlockAudioPlayback();
+
     if (settingsOpen) {
       setSettingsOpen(false);
       return;
@@ -207,7 +217,10 @@ export default function SudaWidget() {
               <button
                 type="button"
                 className="suda-panel__settings"
-                onClick={() => setSettingsOpen((v) => !v)}
+                onClick={() => {
+                  void unlockAudioPlayback();
+                  setSettingsOpen((v) => !v);
+                }}
                 aria-label="Settings"
               >
                 ⚙
