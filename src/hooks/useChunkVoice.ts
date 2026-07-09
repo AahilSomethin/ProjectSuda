@@ -5,33 +5,37 @@ export function useChunkVoice(
   text: string,
   enabled: boolean,
 ): {
-  isVoicePlaying: boolean;
+  isSpeaking: boolean;
   voiceDone: boolean;
 } {
-  const [isVoicePlaying, setIsVoicePlaying] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceDone, setVoiceDone] = useState(!enabled);
 
   useEffect(() => {
     if (!enabled) {
       cancelSpeech();
-      setIsVoicePlaying(false);
+      setIsSpeaking(false);
       setVoiceDone(true);
       return;
     }
 
-    setIsVoicePlaying(false);
+    setIsSpeaking(false);
     setVoiceDone(false);
 
     speakText(text, {
-      onStart: () => setIsVoicePlaying(true),
+      onStart: () => setIsSpeaking(true),
       onEnd: () => {
-        setIsVoicePlaying(false);
+        setIsSpeaking(false);
         setVoiceDone(true);
       },
     });
 
-    return () => cancelSpeech();
+    return () => {
+      cancelSpeech();
+      setIsSpeaking(false);
+      setVoiceDone(true);
+    };
   }, [text, enabled]);
 
-  return { isVoicePlaying, voiceDone };
+  return { isSpeaking, voiceDone };
 }

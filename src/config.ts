@@ -1,5 +1,5 @@
 export const config = {
-  characterGifUrl: import.meta.env.VITE_CHARACTER_GIF_URL ?? "",
+  characterGifUrl: import.meta.env.VITE_CHARACTER_GIF_URL ?? "/suda.gif",
   characterIdleImageUrl:
     import.meta.env.VITE_CHARACTER_IDLE_IMAGE_URL ?? "/suda-idle.png",
   transmissionIntroMs: 3000,

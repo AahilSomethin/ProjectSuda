@@ -1,16 +1,22 @@
 import type { TransmissionPhase } from "../types";
 
+export interface TransmissionActivity {
+  isTyping: boolean;
+  isSpeaking: boolean;
+}
+
 export interface SudaActivityInput {
   briefingLoading: boolean;
   transmissionPhase: TransmissionPhase;
-  /** True while typewriter or voice is active in the popup */
-  transmissionActivity: boolean;
+  isTyping: boolean;
+  isSpeaking: boolean;
 }
 
 export interface SudaActivityState {
   transmissionOpen: boolean;
   isIntro: boolean;
-  isTypingOrSpeaking: boolean;
+  isTyping: boolean;
+  isSpeaking: boolean;
   isSudaActive: boolean;
   shouldUseAnimatedGif: boolean;
   transmissionBusy: boolean;
@@ -21,16 +27,20 @@ export function getSudaActivityState(
 ): SudaActivityState {
   const transmissionOpen = input.transmissionPhase !== "idle";
   const isIntro = input.transmissionPhase === "intro";
-  const isTypingOrSpeaking = input.transmissionActivity;
   const isSudaActive =
-    input.briefingLoading || isIntro || isTypingOrSpeaking;
+    input.briefingLoading ||
+    isIntro ||
+    input.isTyping ||
+    input.isSpeaking;
 
   return {
     transmissionOpen,
     isIntro,
-    isTypingOrSpeaking,
+    isTyping: input.isTyping,
+    isSpeaking: input.isSpeaking,
     isSudaActive,
     shouldUseAnimatedGif: isSudaActive,
-    transmissionBusy: input.briefingLoading || isIntro || isTypingOrSpeaking,
+    transmissionBusy:
+      input.briefingLoading || isIntro || input.isTyping || input.isSpeaking,
   };
 }

@@ -8,7 +8,6 @@ let configMissingWarningShown = false;
 let diagnosticsLogged = false;
 let lastVoiceProvider: "elevenlabs" | "browser" | null = null;
 let audioPlaybackUnlocked = false;
-let lastSpokenText = "";
 // Minimal silent WAV — primes WebView autoplay during a user gesture.
 const SILENT_AUDIO_DATA_URI =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -181,10 +180,6 @@ export async function debugVoiceStatus(): Promise<void> {
     lastVoiceProvider,
     fallbackUsed: lastVoiceProvider === "browser",
   });
-}
-
-export function resetLastSpokenText(): void {
-  lastSpokenText = "";
 }
 
 export function muteVoice(muted: boolean): void {  voiceMuted = muted;
@@ -485,16 +480,7 @@ async function speakWithElevenLabs(
 }
 
 export function speakText(text: string, callbacks?: VoiceCallbacks): void {
-  const normalized = text.trim();
-  if (voiceMuted || !normalized) {
-    callbacks?.onEnd?.();
-    return;
-  }
-
-  if (normalized === lastSpokenText) {
-    if (isDev()) {
-      console.info("[SUDA] Voice skipped (duplicate text)");
-    }
+  if (voiceMuted || !text.trim()) {
     callbacks?.onEnd?.();
     return;
   }
@@ -503,13 +489,12 @@ export function speakText(text: string, callbacks?: VoiceCallbacks): void {
 
   cancelSpeech();
   const generation = speakGeneration;
-  lastSpokenText = normalized;
 
   void (async () => {
-    const usedElevenLabs = await speakWithElevenLabs(normalized, callbacks, generation);
+    const usedElevenLabs = await speakWithElevenLabs(text, callbacks, generation);
     if (generation !== speakGeneration) return;
     if (!usedElevenLabs) {
-      speakWithBrowser(normalized, callbacks, generation);
+      speakWithBrowser(text, callbacks, generation);
     }
   })();
 }

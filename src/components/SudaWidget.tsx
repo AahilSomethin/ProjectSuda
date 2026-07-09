@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { config } from "../config";
 import { useSettings } from "../hooks/useSettings";
 import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
-import { getSudaActivityState } from "../lib/sudaState";
-import { getBriefingVoiceFingerprint } from "../services/briefing";
+import { getSudaActivityState, type TransmissionActivity } from "../lib/sudaState";
 import {
   primeBrowserSpeechForFallback,
-  resetLastSpokenText,
   unlockAudioPlayback,
-} from "../services/voice";import {
+} from "../services/voice";
+import {
   createBriefingErrorPayload,
   createBriefingPayload,
   createCheckingLinearPayload,
@@ -21,7 +20,10 @@ import {
 import SettingsPanel from "./SettingsPanel";
 import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
-import type { LinearBriefingResponse } from "../types";
+
+const SUDA_GIF_SRC = config.characterGifUrl || "/suda.gif";
+const SUDA_IDLE_SRC = config.characterIdleImageUrl || "/suda-idle.png";
+
 async function positionWindowRightMiddle(): Promise<void> {
   try {
     const appWindow = getCurrentWindow();
@@ -60,31 +62,42 @@ export default function SudaWidget() {
   } = useSudaBriefing();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [transmissionActivity, setTransmissionActivity] = useState(false);
-  const lastBriefingFingerprintRef = useRef<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sudaVisualState, setSudaVisualState] = useState<"idle" | "active">(
+    "idle",
+  );
+
   const sudaActivity = useMemo(
     () =>
       getSudaActivityState({
         briefingLoading,
         transmissionPhase: transmission.phase,
-        transmissionActivity,
+        isTyping,
+        isSpeaking,
       }),
-    [briefingLoading, transmission.phase, transmissionActivity],
+    [briefingLoading, transmission.phase, isTyping, isSpeaking],
   );
 
-  const characterImageSrc = useMemo(() => {
-    const activeSrc = config.characterGifUrl || config.characterIdleImageUrl;
-    const idleSrc = config.characterIdleImageUrl || config.characterGifUrl;
-    return sudaActivity.shouldUseAnimatedGif ? activeSrc : idleSrc;
-  }, [sudaActivity.shouldUseAnimatedGif]);
+  useEffect(() => {
+    setSudaVisualState(sudaActivity.isSudaActive ? "active" : "idle");
+  }, [sudaActivity.isSudaActive]);
 
-  const handleMessageActivityChange = useCallback((active: boolean) => {
-    setTransmissionActivity(active);
-  }, []);
+  const characterImageSrc =
+    sudaVisualState === "active" ? SUDA_GIF_SRC : SUDA_IDLE_SRC;
+
+  const handleTransmissionActivityChange = useCallback(
+    (activity: TransmissionActivity) => {
+      setIsTyping(activity.isTyping);
+      setIsSpeaking(activity.isSpeaking);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (transmission.phase === "idle") {
-      setTransmissionActivity(false);
+      setIsTyping(false);
+      setIsSpeaking(false);
     }
   }, [transmission.phase]);
 
@@ -93,43 +106,33 @@ export default function SudaWidget() {
     primeBrowserSpeechForFallback();
   }, []);
 
-  const showBriefingTransmission = useCallback(
-    (briefing: LinearBriefingResponse, options: { allowVoice: boolean }) => {
-      const fingerprint = getBriefingVoiceFingerprint(briefing);
-      const meaningfulChange = fingerprint !== lastBriefingFingerprintRef.current;
-
-      if (meaningfulChange) {
-        lastBriefingFingerprintRef.current = fingerprint;
-        resetLastSpokenText();
-      }
-
-      const voiceEnabled =
-        options.allowVoice && !settings.muteVoice && meaningfulChange;
-
-      showTransmission(createBriefingPayload(briefing, { voiceEnabled }));
+  const showBriefing = useCallback(
+    (voiceEnabled = !settings.muteVoice) => {
+      const latest = getLatestBriefing();
+      if (!latest) return false;
+      showTransmission(createBriefingPayload(latest, { voiceEnabled }));
+      return true;
     },
-    [settings.muteVoice, showTransmission],
+    [getLatestBriefing, settings.muteVoice, showTransmission],
   );
-
-  const showBriefing = useCallback(() => {
-    const latest = getLatestBriefing();
-    if (!latest) return false;
-    showBriefingTransmission(latest, { allowVoice: true });
-    return true;
-  }, [getLatestBriefing, showBriefingTransmission]);
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
     showTransmission(createCheckingLinearPayload());
     const { briefing: result, error } = await loadBriefing();
     if (result) {
-      showBriefingTransmission(result, { allowVoice: true });
+      showTransmission(
+        createBriefingPayload(result, {
+          voiceEnabled: !settings.muteVoice,
+        }),
+      );
       return;
     }
     if (error) {
       showTransmission(createBriefingErrorPayload(error));
     }
-  }, [loadBriefing, showBriefingTransmission, showTransmission]);
+  }, [loadBriefing, settings.muteVoice, showTransmission]);
+
   useEffect(() => {
     const interval = setInterval(async () => {
       const updates = await pollForUpdates();
@@ -245,7 +248,7 @@ export default function SudaWidget() {
                 muteVoice={settings.muteVoice}
                 onRefreshBriefing={refreshBriefing}
                 briefingLoading={briefingLoading}
-                onMessageActivityChange={handleMessageActivityChange}
+                onTransmissionActivityChange={handleTransmissionActivityChange}
                 autoHideMs={getTransmissionAutoHideMs(transmission)}
                 onAutoHide={dismissTransmission}
                 isBusy={sudaActivity.transmissionBusy}

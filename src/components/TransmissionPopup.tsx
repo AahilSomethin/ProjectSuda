@@ -7,6 +7,7 @@ import { useChunkVoice } from "../hooks/useChunkVoice";
 import { useTypewriterText } from "../hooks/useTypewriterText";
 
 import type { ActiveTransmission, TransmissionPhase } from "../types";
+import type { TransmissionActivity } from "../lib/sudaState";
 
 const LINES_PER_PAGE = 5;
 
@@ -36,7 +37,7 @@ interface TransmissionPopupProps {
   muteVoice: boolean;
   onRefreshBriefing?: () => void;
   briefingLoading?: boolean;
-  onMessageActivityChange?: (active: boolean) => void;
+  onTransmissionActivityChange?: (activity: TransmissionActivity) => void;
   autoHideMs?: number;
   onAutoHide?: () => void;
   isBusy?: boolean;
@@ -66,7 +67,7 @@ function MessagePhase({
   isStatus,
   voiceEnabled,
   muteVoice,
-  onMessageActivityChange,
+  onTransmissionActivityChange,
   onMessageCompleteChange,
 }: {
   message: string;
@@ -75,7 +76,7 @@ function MessagePhase({
   isStatus: boolean;
   voiceEnabled: boolean;
   muteVoice: boolean;
-  onMessageActivityChange?: (active: boolean) => void;
+  onTransmissionActivityChange?: (activity: TransmissionActivity) => void;
   onMessageCompleteChange?: (complete: boolean) => void;
 }) {
   const displayChunks = useMemo(() => chunkMessage(message), [message]);
@@ -110,14 +111,14 @@ function MessagePhase({
     { voiceActive: shouldPlayVoice },
   );
 
-  const { isVoicePlaying, voiceDone } = useChunkVoice(
+  const { isSpeaking, voiceDone } = useChunkVoice(
     voiceChunkForPage,
     shouldPlayVoice,
   );
 
   useEffect(() => {
-    onMessageActivityChange?.(isTyping || isVoicePlaying);
-  }, [isTyping, isVoicePlaying, onMessageActivityChange]);
+    onTransmissionActivityChange?.({ isTyping, isSpeaking });
+  }, [isTyping, isSpeaking, onTransmissionActivityChange]);
 
   const typewriterComplete = disableText || isComplete;
   const voiceDisabledOrMuted = !shouldPlayVoice;
@@ -169,7 +170,7 @@ export default function TransmissionPopup({
   muteVoice,
   onRefreshBriefing,
   briefingLoading,
-  onMessageActivityChange,
+  onTransmissionActivityChange,
   autoHideMs,
   onAutoHide,
   isBusy = false,
@@ -197,6 +198,11 @@ export default function TransmissionPopup({
     setMessageComplete(false);
     clearAutoHideTimer();
   }, [message, phase, clearAutoHideTimer]);
+
+  useEffect(() => {
+    if (phase !== "intro") return;
+    onTransmissionActivityChange?.({ isTyping: false, isSpeaking: false });
+  }, [phase, onTransmissionActivityChange]);
 
   const isFinished = phase === "message" && messageComplete;
   const shouldPauseAutoHide =
@@ -260,7 +266,7 @@ export default function TransmissionPopup({
             isStatus={isStatus}
             voiceEnabled={voiceEnabled ?? false}
             muteVoice={muteVoice}
-            onMessageActivityChange={onMessageActivityChange}
+            onTransmissionActivityChange={onTransmissionActivityChange}
             onMessageCompleteChange={handleMessageCompleteChange}
           />
         )}
