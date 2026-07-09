@@ -1,6 +1,4 @@
-// Voice reads the exact chunk SUDA displays — it does not rewrite or summarize.
-// ElevenLabs TTS is routed through a Tauri command so the API key stays server-side.
-
+// Short voice text for ElevenLabs TTS — routed through a Tauri command so the API key stays server-side.
 import { invoke } from "@tauri-apps/api/core";
 
 let voiceMuted = false;
@@ -10,7 +8,7 @@ let configMissingWarningShown = false;
 let diagnosticsLogged = false;
 let lastVoiceProvider: "elevenlabs" | "browser" | null = null;
 let audioPlaybackUnlocked = false;
-
+let lastSpokenText = "";
 // Minimal silent WAV — primes WebView autoplay during a user gesture.
 const SILENT_AUDIO_DATA_URI =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -185,8 +183,11 @@ export async function debugVoiceStatus(): Promise<void> {
   });
 }
 
-export function muteVoice(muted: boolean): void {
-  voiceMuted = muted;
+export function resetLastSpokenText(): void {
+  lastSpokenText = "";
+}
+
+export function muteVoice(muted: boolean): void {  voiceMuted = muted;
   if (muted) {
     cancelSpeech();
   }
@@ -378,8 +379,11 @@ async function speakWithElevenLabs(
     return true;
   }
 
-  let result: TtsResponse;
-  try {
+  if (isDev()) {
+    console.info(`[SUDA] ElevenLabs voice chars=${text.length}`);
+  }
+
+  let result: TtsResponse;  try {
     result = await invoke<TtsResponse>("elevenlabs_tts", { text });
   } catch (error) {
     if (generation !== undefined && generation !== speakGeneration) {
@@ -481,7 +485,16 @@ async function speakWithElevenLabs(
 }
 
 export function speakText(text: string, callbacks?: VoiceCallbacks): void {
-  if (voiceMuted || !text.trim()) {
+  const normalized = text.trim();
+  if (voiceMuted || !normalized) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  if (normalized === lastSpokenText) {
+    if (isDev()) {
+      console.info("[SUDA] Voice skipped (duplicate text)");
+    }
     callbacks?.onEnd?.();
     return;
   }
@@ -490,12 +503,13 @@ export function speakText(text: string, callbacks?: VoiceCallbacks): void {
 
   cancelSpeech();
   const generation = speakGeneration;
+  lastSpokenText = normalized;
 
   void (async () => {
-    const usedElevenLabs = await speakWithElevenLabs(text, callbacks, generation);
+    const usedElevenLabs = await speakWithElevenLabs(normalized, callbacks, generation);
     if (generation !== speakGeneration) return;
     if (!usedElevenLabs) {
-      speakWithBrowser(text, callbacks, generation);
+      speakWithBrowser(normalized, callbacks, generation);
     }
   })();
 }

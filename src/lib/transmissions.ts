@@ -2,6 +2,7 @@ import {
   formatBriefingMessage,
   formatBriefingVoiceText,
   formatNewTasksUpdate,
+  formatNewTasksVoiceText,
 } from "../services/briefing";
 import type {
   ActiveTransmission,
@@ -44,7 +45,7 @@ export function createCheckingLinearPayload(): TransmissionPayload {
     message: SUDA_MESSAGES.checkingLinear,
     type: "briefing",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
     showActions: true,
   };
 }
@@ -55,7 +56,7 @@ export function createBriefingErrorPayload(message: string): TransmissionPayload
     message,
     type: "briefing",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
     showActions: true,
   };
 }
@@ -66,7 +67,7 @@ export function createIdlePayload(): TransmissionPayload {
     message: SUDA_MESSAGES.idle,
     type: "info",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
     showActions: true,
   };
 }
@@ -75,6 +76,7 @@ export function createNewTasksPayload(tasks: LinearTask[]): TransmissionPayload 
   return {
     title: "New Transmission",
     message: formatNewTasksUpdate(tasks),
+    voiceMessage: formatNewTasksVoiceText(tasks),
     type: "update",
     voiceEnabled: true,
   };

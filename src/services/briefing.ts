@@ -89,20 +89,102 @@ export function formatBriefingMessage(briefing: LinearBriefingResponse): string 
   return lines.join("\n");
 }
 
-export function formatBriefingVoiceText(
+const VOICE_LIMIT_BRIEFING = 400;
+const VOICE_LIMIT_EMPTY = 120;
+const VOICE_LIMIT_NEW_TASKS = 200;
+
+export function truncateVoiceText(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) {
+    return trimmed;
+  }
+
+  const slice = trimmed.slice(0, maxChars);
+  const sentenceEnd = Math.max(
+    slice.lastIndexOf("."),
+    slice.lastIndexOf("!"),
+    slice.lastIndexOf("?"),
+  );
+
+  if (sentenceEnd > 0) {
+    return slice.slice(0, sentenceEnd + 1);
+  }
+
+  const wordEnd = slice.lastIndexOf(" ");
+  if (wordEnd > 0) {
+    return `${slice.slice(0, wordEnd)}…`;
+  }
+
+  return `${slice}…`;
+}
+
+function normalizeFirstAction(firstAction: string): string {
+  return firstAction.replace(/\s*\(([^)]+)\)\./, ", $1.");
+}
+
+export function buildBriefingVoiceText(
   briefing: LinearBriefingResponse,
 ): string {
-  const parts: string[] = [briefing.summary];
+  if (briefing.taskCount === 0) {
+    return "No active Linear tasks right now. You're clear.";
+  }
 
-  if (briefing.warnings.length > 0) {
-    parts.push(briefing.warnings.join(" "));
+  const count = briefing.taskCount;
+  const parts = [
+    `You have ${count} active Linear task${count === 1 ? "" : "s"}.`,
+  ];
+
+  const { stats } = briefing;
+  if (stats.overdue > 0) {
+    parts.push(
+      `${stats.overdue} ${stats.overdue === 1 ? "is" : "are"} overdue.`,
+    );
+  } else if (stats.dueToday > 0) {
+    parts.push(
+      `${stats.dueToday} ${stats.dueToday === 1 ? "is" : "are"} due today.`,
+    );
+  } else if (stats.urgentOrHigh > 0) {
+    parts.push(
+      `${stats.urgentOrHigh} ${stats.urgentOrHigh === 1 ? "is" : "are"} urgent or high priority.`,
+    );
   }
 
   if (briefing.firstAction.trim()) {
-    parts.push(briefing.firstAction);
+    parts.push(normalizeFirstAction(briefing.firstAction.trim()));
   }
 
   return parts.join(" ");
+}
+
+export function formatBriefingVoiceText(
+  briefing: LinearBriefingResponse,
+): string {
+  const maxChars =
+    briefing.taskCount === 0 ? VOICE_LIMIT_EMPTY : VOICE_LIMIT_BRIEFING;
+  return truncateVoiceText(buildBriefingVoiceText(briefing), maxChars);
+}
+
+export function formatNewTasksVoiceText(tasks: LinearTask[]): string {
+  if (tasks.length === 0) {
+    return "";
+  }
+
+  const count = tasks.length;
+  const header = `${count} new Linear task${count === 1 ? "" : "s"}.`;
+  const firstTask = tasks[0];
+  const text = firstTask
+    ? `${header} Start with ${firstTask.title}.`
+    : header;
+
+  return truncateVoiceText(text, VOICE_LIMIT_NEW_TASKS);
+}
+
+export function getBriefingVoiceFingerprint(
+  briefing: LinearBriefingResponse,
+): string {
+  const topTaskId = briefing.rawTasks[0]?.identifier ?? "";
+  const warningKey = briefing.warnings.join("|");
+  return `${briefing.taskCount}:${briefing.stats.overdue}:${briefing.stats.urgentOrHigh}:${topTaskId}:${warningKey}`;
 }
 
 export function formatNewTasksUpdate(tasks: LinearTask[]): string {

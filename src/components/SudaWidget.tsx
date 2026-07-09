@@ -1,15 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { config } from "../config";
 import { useSettings } from "../hooks/useSettings";
 import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
 import { getSudaActivityState } from "../lib/sudaState";
+import { getBriefingVoiceFingerprint } from "../services/briefing";
 import {
   primeBrowserSpeechForFallback,
+  resetLastSpokenText,
   unlockAudioPlayback,
-} from "../services/voice";
-import {
+} from "../services/voice";import {
   createBriefingErrorPayload,
   createBriefingPayload,
   createCheckingLinearPayload,
@@ -20,7 +21,7 @@ import {
 import SettingsPanel from "./SettingsPanel";
 import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
-
+import type { LinearBriefingResponse } from "../types";
 async function positionWindowRightMiddle(): Promise<void> {
   try {
     const appWindow = getCurrentWindow();
@@ -60,7 +61,7 @@ export default function SudaWidget() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [transmissionActivity, setTransmissionActivity] = useState(false);
-
+  const lastBriefingFingerprintRef = useRef<string | null>(null);
   const sudaActivity = useMemo(
     () =>
       getSudaActivityState({
@@ -92,33 +93,43 @@ export default function SudaWidget() {
     primeBrowserSpeechForFallback();
   }, []);
 
-  const showBriefing = useCallback(
-    (voiceEnabled = !settings.muteVoice) => {
-      const latest = getLatestBriefing();
-      if (!latest) return false;
-      showTransmission(createBriefingPayload(latest, { voiceEnabled }));
-      return true;
+  const showBriefingTransmission = useCallback(
+    (briefing: LinearBriefingResponse, options: { allowVoice: boolean }) => {
+      const fingerprint = getBriefingVoiceFingerprint(briefing);
+      const meaningfulChange = fingerprint !== lastBriefingFingerprintRef.current;
+
+      if (meaningfulChange) {
+        lastBriefingFingerprintRef.current = fingerprint;
+        resetLastSpokenText();
+      }
+
+      const voiceEnabled =
+        options.allowVoice && !settings.muteVoice && meaningfulChange;
+
+      showTransmission(createBriefingPayload(briefing, { voiceEnabled }));
     },
-    [getLatestBriefing, settings.muteVoice, showTransmission],
+    [settings.muteVoice, showTransmission],
   );
+
+  const showBriefing = useCallback(() => {
+    const latest = getLatestBriefing();
+    if (!latest) return false;
+    showBriefingTransmission(latest, { allowVoice: true });
+    return true;
+  }, [getLatestBriefing, showBriefingTransmission]);
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
     showTransmission(createCheckingLinearPayload());
     const { briefing: result, error } = await loadBriefing();
     if (result) {
-      showTransmission(
-        createBriefingPayload(result, {
-          voiceEnabled: !settings.muteVoice,
-        }),
-      );
+      showBriefingTransmission(result, { allowVoice: true });
       return;
     }
     if (error) {
       showTransmission(createBriefingErrorPayload(error));
     }
-  }, [loadBriefing, settings.muteVoice, showTransmission]);
-
+  }, [loadBriefing, showBriefingTransmission, showTransmission]);
   useEffect(() => {
     const interval = setInterval(async () => {
       const updates = await pollForUpdates();
