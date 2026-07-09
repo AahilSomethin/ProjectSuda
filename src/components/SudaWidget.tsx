@@ -15,7 +15,8 @@ import {
   createTaskChangesPayload,
   getTransmissionAutoHideMs,
 } from "../lib/transmissions";
-import { setWindowMode } from "../lib/windowMode";
+import { setSettingsOverlay, setWindowMode } from "../lib/windowMode";
+import type { TransmissionPayload } from "../types";
 import { briefingToLinearTasks } from "../services/briefing";
 import {
   primeBrowserSpeechForFallback,
@@ -50,33 +51,45 @@ export default function SudaWidget() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isManuallySummoned, setIsManuallySummoned] = useState(false);
+  const pendingSettingsOpenRef = useRef(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sudaVisualState, setSudaVisualState] = useState<"idle" | "active">(
     "idle",
   );
 
-  const isManuallySummonedRef = useRef(isManuallySummoned);
-  useEffect(() => {
-    isManuallySummonedRef.current = isManuallySummoned;
-  }, [isManuallySummoned]);
-
   const hasActiveTransmission = transmission.phase !== "idle";
-  const shouldShowPanel = hasActiveTransmission || isManuallySummoned;
+  const sudaPanelIntent = hasActiveTransmission || isManuallySummoned;
+  const shouldShowPanel = !settingsOpen && sudaPanelIntent;
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+  }, []);
 
   const handlePanelCloseComplete = useCallback(() => {
+    setIsManuallySummoned(false);
     dismissTransmission();
-    if (!isManuallySummonedRef.current) {
-      setIsManuallySummoned(false);
+    if (pendingSettingsOpenRef.current) {
+      pendingSettingsOpenRef.current = false;
+      setSettingsOpen(true);
     }
   }, [dismissTransmission]);
+
+  const presentTransmission = useCallback(
+    (payload: TransmissionPayload) => {
+      pendingSettingsOpenRef.current = false;
+      setSettingsOpen(false);
+      showTransmission(payload);
+    },
+    [showTransmission],
+  );
 
   const {
     panelReveal,
     panelMounted,
     edgeExpanded,
     contentVisible,
-    dismissPanel,
   } = usePanelReveal({
     shouldShowPanel,
     onCloseComplete: handlePanelCloseComplete,
@@ -121,6 +134,40 @@ export default function SudaWidget() {
   }, []);
 
   useEffect(() => {
+    if (panelMounted) return;
+
+    if (settingsOpen) {
+      void setSettingsOverlay(true);
+    } else {
+      void setSettingsOverlay(false);
+    }
+  }, [panelMounted, settingsOpen]);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (settingsRef.current?.contains(target)) return;
+      if (document.querySelector(".suda-control")?.contains(target)) return;
+      closeSettings();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeSettings();
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeSettings, settingsOpen]);
+
+  useEffect(() => {
     if (!briefing || startupHandledRef.current) return;
 
     startupHandledRef.current = true;
@@ -128,7 +175,7 @@ export default function SudaWidget() {
     establishBaseline(tasks);
 
     if (evaluateStartupImportance(briefing)) {
-      showTransmission(
+      presentTransmission(
         createStartupBriefingPayload(briefing, {
           voiceEnabled: !settings.muteVoice,
         }),
@@ -142,18 +189,18 @@ export default function SudaWidget() {
     establishBaseline,
     evaluateStartupImportance,
     settings.muteVoice,
-    showTransmission,
+    presentTransmission,
     startupHandledRef,
   ]);
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
-    showTransmission(createCheckingLinearPayload());
+    presentTransmission(createCheckingLinearPayload());
     const { briefing: result, error } = await loadBriefing();
     if (result) {
       const tasks = briefingToLinearTasks(result);
       establishBaseline(tasks);
-      showTransmission(
+      presentTransmission(
         createBriefingPayload(result, {
           voiceEnabled: !settings.muteVoice,
         }),
@@ -162,41 +209,55 @@ export default function SudaWidget() {
       return;
     }
     if (error) {
-      showTransmission(createBriefingErrorPayload(error));
+      presentTransmission(createBriefingErrorPayload(error));
     }
-  }, [establishBaseline, loadBriefing, settings.muteVoice, showTransmission]);
+  }, [establishBaseline, loadBriefing, presentTransmission, settings.muteVoice]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
       const changes = await pollForChanges();
       if (changes.length === 0) return;
-      showTransmission(createTaskChangesPayload(changes));
+      presentTransmission(createTaskChangesPayload(changes));
       devLog("[SUDA] transmission opened");
     }, config.linearPollIntervalMs);
 
     return () => clearInterval(interval);
-  }, [pollForChanges, showTransmission]);
+  }, [pollForChanges, presentTransmission]);
 
   const summonSuda = useCallback(() => {
     void unlockAudioPlayback();
+    pendingSettingsOpenRef.current = false;
+    setSettingsOpen(false);
     setIsManuallySummoned(true);
     if (!hasActiveTransmission) {
-      showTransmission(createSummonedIdlePayload());
+      presentTransmission(createSummonedIdlePayload());
     }
-  }, [hasActiveTransmission, showTransmission]);
+  }, [hasActiveTransmission, presentTransmission]);
 
   const dismissSuda = useCallback(() => {
+    pendingSettingsOpenRef.current = false;
     setIsManuallySummoned(false);
-    dismissPanel();
-  }, [dismissPanel]);
+    dismissTransmission();
+  }, [dismissTransmission]);
+
+  const openSettingsFromFab = useCallback(() => {
+    void unlockAudioPlayback();
+    if (sudaPanelIntent) {
+      pendingSettingsOpenRef.current = true;
+      setIsManuallySummoned(false);
+      dismissTransmission();
+      return;
+    }
+    setSettingsOpen(true);
+  }, [dismissTransmission, sudaPanelIntent]);
 
   const handleAutoHide = useCallback(() => {
     if (isManuallySummoned) {
-      showTransmission(createSummonedIdlePayload());
+      presentTransmission(createSummonedIdlePayload());
       return;
     }
-    dismissPanel();
-  }, [dismissPanel, isManuallySummoned, showTransmission]);
+    dismissTransmission();
+  }, [dismissTransmission, isManuallySummoned, presentTransmission]);
 
   const showCharacter =
     !settings.hideCharacter && (transmission.characterVisible ?? true);
@@ -212,8 +273,13 @@ export default function SudaWidget() {
     .filter(Boolean)
     .join(" ");
 
+  const widgetClassName = [
+    "suda-widget",
+    panelMounted ? "suda-widget--expanded" : "suda-widget--compact",
+  ].join(" ");
+
   return (
-    <div className="suda-widget">
+    <div className={widgetClassName}>
       <SudaControlMenu
         panelVisible={panelMounted}
         briefingLoading={briefingLoading}
@@ -221,22 +287,21 @@ export default function SudaWidget() {
         onSummon={summonSuda}
         onDismiss={dismissSuda}
         onRefreshBriefing={refreshBriefing}
-        onOpenSettings={() => {
-          void unlockAudioPlayback();
-          setSettingsOpen(true);
-        }}
-        onCloseSettings={() => setSettingsOpen(false)}
+        onOpenSettings={openSettingsFromFab}
+        onCloseSettings={closeSettings}
       />
 
       {settingsOpen && (
-        <SettingsPanel
-          settings={settings}
-          onUpdate={updateSetting}
-          onClose={() => setSettingsOpen(false)}
-        />
+        <div ref={settingsRef} className="suda-settings-wrap">
+          <SettingsPanel
+            settings={settings}
+            onUpdate={updateSetting}
+            onClose={closeSettings}
+          />
+        </div>
       )}
 
-      {panelMounted && (
+      {panelMounted && !settingsOpen && (
         <div className="suda-widget__inner">
           <div className={panelClassName}>
             <button
@@ -281,6 +346,7 @@ export default function SudaWidget() {
               </div>
 
               {panelReveal === "open" &&
+                !settingsOpen &&
                 isExpanded &&
                 transmission.phase !== "idle" && (
                   <TransmissionPopup

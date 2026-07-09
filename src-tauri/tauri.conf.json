@@ -14,8 +14,8 @@
       {
         "title": "SUDA",
         "label": "main",
-        "width": 380,
-        "height": 420,
+        "width": 56,
+        "height": 56,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,

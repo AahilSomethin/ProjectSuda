@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { setCompactOverlay } from "../lib/windowMode";
 
 interface SudaControlMenuProps {
   panelVisible: boolean;
@@ -25,6 +26,11 @@ export default function SudaControlMenu({
   const rootRef = useRef<HTMLDivElement>(null);
 
   const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  useEffect(() => {
+    if (panelVisible || settingsOpen) return;
+    void setCompactOverlay(menuOpen);
+  }, [menuOpen, panelVisible, settingsOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -104,7 +110,7 @@ export default function SudaControlMenu({
               role="menuitem"
               onClick={handleDismiss}
             >
-              Dismiss SUDA
+              Hide SUDA
             </button>
           )}
           <button

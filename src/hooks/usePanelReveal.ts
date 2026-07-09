@@ -32,10 +32,21 @@ export function usePanelReveal({
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const onCloseCompleteRef = useRef(onCloseComplete);
   const closeGenerationRef = useRef(0);
+  const prevShouldShowRef = useRef<boolean | null>(null);
+  const panelMountedRef = useRef(panelMounted);
+  const panelRevealRef = useRef(panelReveal);
 
   useEffect(() => {
     onCloseCompleteRef.current = onCloseComplete;
   }, [onCloseComplete]);
+
+  useEffect(() => {
+    panelMountedRef.current = panelMounted;
+  }, [panelMounted]);
+
+  useEffect(() => {
+    panelRevealRef.current = panelReveal;
+  }, [panelReveal]);
 
   const clearTimers = useCallback(() => {
     for (const id of timersRef.current) {
@@ -94,7 +105,7 @@ export function usePanelReveal({
   }, [clearTimers, finishOpen, schedule]);
 
   const dismissPanel = useCallback(() => {
-    if (!panelMounted || panelReveal === "closing") return;
+    if (!panelMountedRef.current || panelRevealRef.current === "closing") return;
 
     clearTimers();
     const generation = ++closeGenerationRef.current;
@@ -112,20 +123,25 @@ export function usePanelReveal({
       () => finishClose(generation),
       CLOSE_CONTENT_HIDE_MS + CLOSE_EDGE_CONTRACT_MS,
     );
-  }, [clearTimers, finishClose, panelMounted, panelReveal, schedule]);
+  }, [clearTimers, finishClose, schedule]);
 
   useEffect(() => {
-    if (!shouldShowPanel) return;
+    const prev = prevShouldShowRef.current;
+    prevShouldShowRef.current = shouldShowPanel;
 
-    if (panelReveal === "closing") {
-      startOpen();
+    if (prev === null) {
+      if (shouldShowPanel) {
+        startOpen();
+      }
       return;
     }
 
-    if (!panelMounted) {
+    if (shouldShowPanel && !prev) {
       startOpen();
+    } else if (!shouldShowPanel && prev) {
+      dismissPanel();
     }
-  }, [shouldShowPanel, panelMounted, panelReveal, startOpen]);
+  }, [shouldShowPanel, startOpen, dismissPanel]);
 
   useEffect(() => clearTimers, [clearTimers]);
 
@@ -134,6 +150,5 @@ export function usePanelReveal({
     panelMounted,
     edgeExpanded,
     contentVisible,
-    dismissPanel,
   };
 }
