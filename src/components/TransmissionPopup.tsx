@@ -56,6 +56,8 @@ interface TransmissionPopupProps {
 
   briefingLoading?: boolean;
 
+  onMessageActivityChange?: (active: boolean) => void;
+
 }
 
 
@@ -112,6 +114,8 @@ function MessagePhase({
 
   muteVoice,
 
+  onMessageActivityChange,
+
 }: {
 
   message: string;
@@ -125,6 +129,8 @@ function MessagePhase({
   voiceEnabled: boolean;
 
   muteVoice: boolean;
+
+  onMessageActivityChange?: (active: boolean) => void;
 
 }) {
 
@@ -187,7 +193,15 @@ function MessagePhase({
 
 
 
-  const { voiceDone } = useChunkVoice(voiceChunkForPage, shouldPlayVoice);
+  const { isVoicePlaying, voiceDone } = useChunkVoice(voiceChunkForPage, shouldPlayVoice);
+
+
+
+  useEffect(() => {
+
+    onMessageActivityChange?.(isTyping || isVoicePlaying);
+
+  }, [isTyping, isVoicePlaying, onMessageActivityChange]);
 
 
 
@@ -275,6 +289,8 @@ export default function TransmissionPopup({
 
   briefingLoading,
 
+  onMessageActivityChange,
+
 }: TransmissionPopupProps) {
 
   const { phase, message, voiceMessage, skipIntro, showActions, voiceEnabled } =
@@ -324,6 +340,8 @@ export default function TransmissionPopup({
             voiceEnabled={voiceEnabled ?? false}
 
             muteVoice={muteVoice}
+
+            onMessageActivityChange={onMessageActivityChange}
 
           />
 

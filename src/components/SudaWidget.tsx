@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { config } from "../config";
 import { useSettings } from "../hooks/useSettings";
@@ -89,13 +89,33 @@ export default function SudaWidget() {
   const [briefing, setBriefing] = useState<LinearBriefingResponse | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
+  const [transmissionActivity, setTransmissionActivity] = useState(false);
   const seenIdsRef = useRef<Set<string>>(loadSeenIds());
   const pollInitializedRef = useRef(false);
   const briefingRequestRef = useRef(0);
 
-  const isTransmitting =
-    transmission.phase === "intro" ||
-    (transmission.phase === "message" && !transmission.skipIntro);
+  const hasActiveTransmission =
+    transmission.phase === "intro" || transmissionActivity;
+
+  const isSudaActive = briefingLoading || hasActiveTransmission;
+
+  const characterImageSrc = useMemo(
+    () =>
+      isSudaActive
+        ? config.characterGifUrl || config.characterIdleImageUrl
+        : config.characterIdleImageUrl || config.characterGifUrl,
+    [isSudaActive],
+  );
+
+  const handleMessageActivityChange = useCallback((active: boolean) => {
+    setTransmissionActivity(active);
+  }, []);
+
+  useEffect(() => {
+    if (transmission.phase === "idle") {
+      setTransmissionActivity(false);
+    }
+  }, [transmission.phase]);
 
   const loadBriefing = useCallback(
     async (options?: { showPopup?: boolean; voiceEnabled?: boolean }) => {
@@ -291,14 +311,14 @@ export default function SudaWidget() {
               {showCharacter ? (
                 <button
                   type="button"
-                  className={`suda-panel__visual${isTransmitting ? " suda-panel__visual--transmitting" : ""}`}
+                  className={`suda-panel__visual${isSudaActive ? " suda-panel__visual--transmitting" : ""}`}
                   onClick={handleAvatarClick}
                   aria-label="SUDA companion"
                 >
-                  {config.characterGifUrl ? (
+                  {characterImageSrc ? (
                     <img
                       className="suda-panel__visual-img"
-                      src={config.characterGifUrl}
+                      src={characterImageSrc}
                       alt="SUDA"
                     />
                   ) : (
@@ -336,6 +356,7 @@ export default function SudaWidget() {
                 muteVoice={settings.muteVoice}
                 onRefreshBriefing={handleRefreshBriefing}
                 briefingLoading={briefingLoading}
+                onMessageActivityChange={handleMessageActivityChange}
               />
             )}
           </div>
