@@ -12,7 +12,7 @@ import {
   getCachedBriefing,
 } from "../services/briefing";
 import { fetchNewLinearUpdates } from "../services/linear";
-import type { LinearBriefingResponse } from "../types";
+import type { ActiveTransmission, LinearBriefingResponse } from "../types";
 import SettingsPanel from "./SettingsPanel";
 import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
@@ -74,6 +74,16 @@ function showBriefingTransmission(
     voiceEnabled,
     showActions: true,
   });
+}
+
+function getTransmissionAutoHideMs(transmission: ActiveTransmission): number {
+  if (transmission.message.startsWith("Failed to load Linear briefing")) {
+    return 15_000;
+  }
+  if (transmission.message === IDLE_MESSAGE) {
+    return 8_000;
+  }
+  return 10_000;
 }
 
 export default function SudaWidget() {
@@ -357,6 +367,13 @@ export default function SudaWidget() {
                 onRefreshBriefing={handleRefreshBriefing}
                 briefingLoading={briefingLoading}
                 onMessageActivityChange={handleMessageActivityChange}
+                autoHideMs={getTransmissionAutoHideMs(transmission)}
+                onAutoHide={dismissTransmission}
+                isBusy={
+                  briefingLoading ||
+                  transmission.phase === "intro" ||
+                  transmissionActivity
+                }
               />
             )}
           </div>
