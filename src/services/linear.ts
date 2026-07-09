@@ -46,16 +46,4 @@ export async function fetchIncompleteLinearTasks(
   }
 }
 
-export async function fetchNewLinearUpdates(
-  seenIds: Set<string>,
-  forceRefresh = false,
-): Promise<LinearTask[]> {
-  try {
-    const tasks = await fetchIncompleteLinearTasks(forceRefresh);
-    return tasks.filter((task) => !seenIds.has(task.id));
-  } catch {
-    return [];
-  }
-}
-
 export { fetchLinearBriefing, BriefingError };

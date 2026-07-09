@@ -4,10 +4,13 @@ export type TransmissionPhase = "idle" | "intro" | "message";
 
 export interface LinearTask {
   id: string;
+  linearId: string;
   title: string;
   description?: string;
   status: string;
   priority?: string;
+  dueDate?: string | null;
+  assignee?: string | null;
   updatedAt: string;
 }
 
@@ -19,6 +22,7 @@ export interface BriefingFocusTask {
 
 export interface BriefingRawTask {
   identifier: string;
+  linearId: string;
   title: string;
   url: string;
   state: string;
@@ -27,6 +31,8 @@ export interface BriefingRawTask {
   updatedAt?: string | null;
   project?: string | null;
   team?: string | null;
+  description?: string | null;
+  assignee?: string | null;
 }
 
 export interface BriefingStats {

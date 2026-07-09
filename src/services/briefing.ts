@@ -1,7 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
+import { formatDueLabelInMaldivesTime } from "../lib/timezone";
 import type { LinearBriefingResponse, LinearTask } from "../types";
+import type { TaskChange } from "../lib/taskChanges";
 
 let cachedBriefing: LinearBriefingResponse | null = null;
+
+const VOICE_LIMIT_BRIEFING = 400;
+const VOICE_LIMIT_EMPTY = 120;
+const VOICE_LIMIT_UPDATES = 700;
+const VOICE_TOP_UPDATES = 5;
 
 function isTauriInvokeAvailable(): boolean {
   return (
@@ -56,6 +63,18 @@ export function setCachedBriefing(briefing: LinearBriefingResponse | null): void
   cachedBriefing = briefing;
 }
 
+export function evaluateStartupImportance(
+  briefing: LinearBriefingResponse,
+): boolean {
+  if (briefing.taskCount === 0) return false;
+  const { stats } = briefing;
+  return (
+    stats.overdue > 0 ||
+    stats.dueToday > 0 ||
+    stats.urgentOrHigh > 0
+  );
+}
+
 export function formatBriefingMessage(briefing: LinearBriefingResponse): string {
   const lines: string[] = [briefing.summary];
 
@@ -88,10 +107,6 @@ export function formatBriefingMessage(briefing: LinearBriefingResponse): string 
 
   return lines.join("\n");
 }
-
-const VOICE_LIMIT_BRIEFING = 400;
-const VOICE_LIMIT_EMPTY = 120;
-const VOICE_LIMIT_NEW_TASKS = 200;
 
 export function truncateVoiceText(text: string, maxChars: number): string {
   const trimmed = text.trim();
@@ -164,41 +179,58 @@ export function formatBriefingVoiceText(
   return truncateVoiceText(buildBriefingVoiceText(briefing), maxChars);
 }
 
-export function formatNewTasksVoiceText(tasks: LinearTask[]): string {
-  if (tasks.length === 0) {
-    return "";
-  }
-
-  const count = tasks.length;
-  const header = `${count} new Linear task${count === 1 ? "" : "s"}.`;
-  const firstTask = tasks[0];
-  const text = firstTask
-    ? `${header} Start with ${firstTask.title}.`
-    : header;
-
-  return truncateVoiceText(text, VOICE_LIMIT_NEW_TASKS);
+function taskStatusDueLabel(task: LinearTask): string {
+  const due = formatDueLabelInMaldivesTime(task.dueDate);
+  if (due) return `${task.status}, ${due}`;
+  return task.status;
 }
 
-export function getBriefingVoiceFingerprint(
-  briefing: LinearBriefingResponse,
-): string {
-  const topTaskId = briefing.rawTasks[0]?.identifier ?? "";
-  const warningKey = briefing.warnings.join("|");
-  return `${briefing.taskCount}:${briefing.stats.overdue}:${briefing.stats.urgentOrHigh}:${topTaskId}:${warningKey}`;
+function formatTaskShortLine(change: TaskChange): string {
+  const { task, changes, kind } = change;
+  const statusDue = taskStatusDueLabel(task);
+  const changeNote =
+    kind === "new"
+      ? ""
+      : changes.length > 0
+        ? ` (${changes.join(", ")})`
+        : "";
+  return `${task.id} ${task.title} — ${statusDue}${changeNote}`;
 }
 
-export function formatNewTasksUpdate(tasks: LinearTask[]): string {
-  if (tasks.length === 0) {
-    return "No new Linear tasks.";
+export function formatTaskChangesUpdate(changes: TaskChange[]): string {
+  if (changes.length === 0) {
+    return "No Linear updates.";
   }
 
-  const header = `${tasks.length} new Linear task${tasks.length === 1 ? "" : "s"}:`;
-  const lines = tasks.map((task) => {
-    const priority = task.priority ? `, ${task.priority}` : "";
-    return `• ${task.title} [${task.status}${priority}]`;
+  const header = `${changes.length} Linear update${changes.length === 1 ? "" : "s"}:`;
+  const lines = changes.map((change) => `• ${formatTaskShortLine(change)}`);
+  return [header, ...lines].join("\n");
+}
+
+export function formatTaskChangesVoiceText(changes: TaskChange[]): string {
+  if (changes.length === 0) return "";
+
+  const count = changes.length;
+  const header = `${count} Linear update${count === 1 ? "" : "s"}.`;
+  const top = changes.slice(0, VOICE_TOP_UPDATES);
+  const lines = top.map((change) => {
+    const { task, changes: changeLabels, kind } = change;
+    const statusDue = taskStatusDueLabel(task);
+    if (kind === "new") {
+      return `${task.id} ${task.title}, ${statusDue}.`;
+    }
+    const note =
+      changeLabels.includes("description updated")
+        ? "description updated"
+        : changeLabels.join(", ");
+    return `${task.id} ${task.title}, ${statusDue}, ${note}.`;
   });
 
-  return [header, ...lines].join("\n");
+  const remainder = count - top.length;
+  const tail =
+    remainder > 0 ? ` Plus ${remainder} more update${remainder === 1 ? "" : "s"}.` : "";
+
+  return truncateVoiceText(`${header} ${lines.join(" ")}${tail}`, VOICE_LIMIT_UPDATES);
 }
 
 export function briefingToLinearTasks(
@@ -206,9 +238,13 @@ export function briefingToLinearTasks(
 ): LinearTask[] {
   return briefing.rawTasks.map((task) => ({
     id: task.identifier,
+    linearId: task.linearId,
     title: task.title,
+    description: task.description ?? undefined,
     status: task.state,
     priority: priorityLabel(task.priority),
+    dueDate: task.dueDate,
+    assignee: task.assignee,
     updatedAt: task.updatedAt ?? briefing.generatedAt,
   }));
 }

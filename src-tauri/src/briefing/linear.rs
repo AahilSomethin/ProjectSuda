@@ -30,6 +30,10 @@ query MyIssues {
       priority
       dueDate
       updatedAt
+      description
+      assignee {
+        name
+      }
       state {
         name
         type
@@ -72,6 +76,11 @@ struct LinearProject {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+struct LinearAssignee {
+    name: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LinearIssueNode {
     id: String,
@@ -81,6 +90,8 @@ struct LinearIssueNode {
     priority: i32,
     due_date: Option<String>,
     updated_at: Option<String>,
+    description: Option<String>,
+    assignee: Option<LinearAssignee>,
     state: Option<LinearState>,
     team: Option<LinearTeam>,
     project: Option<LinearProject>,
@@ -119,6 +130,8 @@ pub struct RawLinearTask {
     pub project: Option<String>,
     pub team: Option<String>,
     pub updated_at: Option<String>,
+    pub description: Option<String>,
+    pub assignee: Option<String>,
 }
 
 fn log_linear(message: impl AsRef<str>) {
@@ -222,6 +235,8 @@ fn map_node(node: LinearIssueNode) -> RawLinearTask {
         project: node.project.map(|p| p.name),
         team: node.team.map(|t| t.name),
         updated_at: node.updated_at,
+        description: node.description,
+        assignee: node.assignee.map(|a| a.name),
     }
 }
 
@@ -306,6 +321,8 @@ mod tests {
             project: None,
             team: Some("Engineering".to_string()),
             updated_at: updated_at.map(str::to_string),
+            description: None,
+            assignee: None,
         }
     }
 

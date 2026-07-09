@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { config } from "../config";
 import { usePanelReveal } from "../hooks/usePanelReveal";
 import { useSettings } from "../hooks/useSettings";
 import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
+import { devLog } from "../lib/devLog";
 import { getSudaActivityState, type TransmissionActivity } from "../lib/sudaState";
 import {
   createBriefingErrorPayload,
   createBriefingPayload,
   createCheckingLinearPayload,
   createSummonedIdlePayload,
-  createNewTasksPayload,
+  createStartupBriefingPayload,
+  createTaskChangesPayload,
   getTransmissionAutoHideMs,
 } from "../lib/transmissions";
 import { setWindowMode } from "../lib/windowMode";
+import { briefingToLinearTasks } from "../services/briefing";
 import {
   primeBrowserSpeechForFallback,
   unlockAudioPlayback,
@@ -36,10 +39,13 @@ export default function SudaWidget() {
   } = useTransmission(settings);
 
   const {
+    briefing,
     briefingLoading,
     loadBriefing,
-    pollForUpdates,
-    markTasksSeen,
+    pollForChanges,
+    establishBaseline,
+    evaluateStartupImportance,
+    startupHandledRef,
   } = useSudaBriefing();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -50,12 +56,19 @@ export default function SudaWidget() {
     "idle",
   );
 
+  const isManuallySummonedRef = useRef(isManuallySummoned);
+  useEffect(() => {
+    isManuallySummonedRef.current = isManuallySummoned;
+  }, [isManuallySummoned]);
+
   const hasActiveTransmission = transmission.phase !== "idle";
   const shouldShowPanel = hasActiveTransmission || isManuallySummoned;
 
   const handlePanelCloseComplete = useCallback(() => {
     dismissTransmission();
-    setIsManuallySummoned(false);
+    if (!isManuallySummonedRef.current) {
+      setIsManuallySummoned(false);
+    }
   }, [dismissTransmission]);
 
   const {
@@ -107,33 +120,62 @@ export default function SudaWidget() {
     primeBrowserSpeechForFallback();
   }, []);
 
+  useEffect(() => {
+    if (!briefing || startupHandledRef.current) return;
+
+    startupHandledRef.current = true;
+    const tasks = briefingToLinearTasks(briefing);
+    establishBaseline(tasks);
+
+    if (evaluateStartupImportance(briefing)) {
+      showTransmission(
+        createStartupBriefingPayload(briefing, {
+          voiceEnabled: !settings.muteVoice,
+        }),
+      );
+      devLog("[SUDA] transmission opened");
+    } else {
+      devLog("[SUDA] startup calm — no transmission");
+    }
+  }, [
+    briefing,
+    establishBaseline,
+    evaluateStartupImportance,
+    settings.muteVoice,
+    showTransmission,
+    startupHandledRef,
+  ]);
+
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
     showTransmission(createCheckingLinearPayload());
     const { briefing: result, error } = await loadBriefing();
     if (result) {
+      const tasks = briefingToLinearTasks(result);
+      establishBaseline(tasks);
       showTransmission(
         createBriefingPayload(result, {
           voiceEnabled: !settings.muteVoice,
         }),
       );
+      devLog("[SUDA] transmission opened");
       return;
     }
     if (error) {
       showTransmission(createBriefingErrorPayload(error));
     }
-  }, [loadBriefing, settings.muteVoice, showTransmission]);
+  }, [establishBaseline, loadBriefing, settings.muteVoice, showTransmission]);
 
   useEffect(() => {
     const interval = setInterval(async () => {
-      const updates = await pollForUpdates();
-      if (updates.length === 0) return;
-      showTransmission(createNewTasksPayload(updates));
-      markTasksSeen(updates.map((task) => task.id));
+      const changes = await pollForChanges();
+      if (changes.length === 0) return;
+      showTransmission(createTaskChangesPayload(changes));
+      devLog("[SUDA] transmission opened");
     }, config.linearPollIntervalMs);
 
     return () => clearInterval(interval);
-  }, [markTasksSeen, pollForUpdates, showTransmission]);
+  }, [pollForChanges, showTransmission]);
 
   const summonSuda = useCallback(() => {
     void unlockAudioPlayback();
@@ -144,6 +186,7 @@ export default function SudaWidget() {
   }, [hasActiveTransmission, showTransmission]);
 
   const dismissSuda = useCallback(() => {
+    setIsManuallySummoned(false);
     dismissPanel();
   }, [dismissPanel]);
 

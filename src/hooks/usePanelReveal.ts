@@ -31,6 +31,7 @@ export function usePanelReveal({
   const [contentVisible, setContentVisible] = useState(false);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const onCloseCompleteRef = useRef(onCloseComplete);
+  const closeGenerationRef = useRef(0);
 
   useEffect(() => {
     onCloseCompleteRef.current = onCloseComplete;
@@ -55,7 +56,10 @@ export function usePanelReveal({
     setEdgeExpanded(true);
   }, []);
 
-  const finishClose = useCallback(() => {
+  const finishClose = useCallback((generation: number) => {
+    if (generation !== closeGenerationRef.current) {
+      return;
+    }
     onCloseCompleteRef.current();
     setPanelMounted(false);
     setPanelReveal("closed");
@@ -66,6 +70,7 @@ export function usePanelReveal({
 
   const startOpen = useCallback(() => {
     clearTimers();
+    closeGenerationRef.current += 1;
     setPanelMounted(true);
     setPanelReveal("opening");
     setEdgeExpanded(false);
@@ -92,24 +97,32 @@ export function usePanelReveal({
     if (!panelMounted || panelReveal === "closing") return;
 
     clearTimers();
+    const generation = ++closeGenerationRef.current;
     cancelSpeech();
     setPanelReveal("closing");
     setContentVisible(false);
 
     if (prefersReducedMotion()) {
-      finishClose();
+      finishClose(generation);
       return;
     }
 
     schedule(() => setEdgeExpanded(false), CLOSE_CONTENT_HIDE_MS);
     schedule(
-      () => finishClose(),
+      () => finishClose(generation),
       CLOSE_CONTENT_HIDE_MS + CLOSE_EDGE_CONTRACT_MS,
     );
   }, [clearTimers, finishClose, panelMounted, panelReveal, schedule]);
 
   useEffect(() => {
-    if (shouldShowPanel && !panelMounted && panelReveal !== "closing") {
+    if (!shouldShowPanel) return;
+
+    if (panelReveal === "closing") {
+      startOpen();
+      return;
+    }
+
+    if (!panelMounted) {
       startOpen();
     }
   }, [shouldShowPanel, panelMounted, panelReveal, startOpen]);

@@ -1,14 +1,16 @@
 import {
   formatBriefingMessage,
   formatBriefingVoiceText,
-  formatNewTasksUpdate,
+  formatTaskChangesUpdate,
+  formatTaskChangesVoiceText,
 } from "../services/briefing";
+import { getGreetingTitle } from "./timezone";
 import type {
   ActiveTransmission,
   LinearBriefingResponse,
-  LinearTask,
   TransmissionPayload,
 } from "../types";
+import type { TaskChange } from "./taskChanges";
 
 export const SUDA_MESSAGES = {
   idle: "SUDA standing by.",
@@ -28,7 +30,7 @@ export function createBriefingPayload(
   options?: { voiceEnabled?: boolean; skipIntro?: boolean },
 ): TransmissionPayload {
   return {
-    title: "Morning Briefing",
+    title: getGreetingTitle(),
     message: formatBriefingMessage(briefing),
     voiceMessage: formatBriefingVoiceText(briefing),
     type: "briefing",
@@ -37,9 +39,19 @@ export function createBriefingPayload(
   };
 }
 
+export function createStartupBriefingPayload(
+  briefing: LinearBriefingResponse,
+  options?: { voiceEnabled?: boolean },
+): TransmissionPayload {
+  return createBriefingPayload(briefing, {
+    voiceEnabled: options?.voiceEnabled ?? true,
+    skipIntro: true,
+  });
+}
+
 export function createCheckingLinearPayload(): TransmissionPayload {
   return {
-    title: "Morning Briefing",
+    title: getGreetingTitle(),
     message: SUDA_MESSAGES.checkingLinear,
     type: "briefing",
     skipIntro: true,
@@ -49,19 +61,9 @@ export function createCheckingLinearPayload(): TransmissionPayload {
 
 export function createBriefingErrorPayload(message: string): TransmissionPayload {
   return {
-    title: "Morning Briefing",
+    title: getGreetingTitle(),
     message,
     type: "briefing",
-    skipIntro: true,
-    voiceEnabled: true,
-  };
-}
-
-export function createIdlePayload(): TransmissionPayload {
-  return {
-    title: "SUDA",
-    message: SUDA_MESSAGES.idle,
-    type: "info",
     skipIntro: true,
     voiceEnabled: true,
   };
@@ -78,11 +80,15 @@ export function createSummonedIdlePayload(): TransmissionPayload {
   };
 }
 
-export function createNewTasksPayload(tasks: LinearTask[]): TransmissionPayload {
+export function createTaskChangesPayload(
+  changes: TaskChange[],
+): TransmissionPayload {
   return {
     title: "New Transmission",
-    message: formatNewTasksUpdate(tasks),
+    message: formatTaskChangesUpdate(changes),
+    voiceMessage: formatTaskChangesVoiceText(changes),
     type: "update",
+    skipIntro: true,
     voiceEnabled: true,
   };
 }

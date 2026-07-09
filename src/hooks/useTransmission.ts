@@ -76,7 +76,6 @@ export function useTransmission(settings: WidgetSettings) {
   return {
     transmission,
     isExpanded,
-    setIsExpanded,
     showTransmission,
     dismissTransmission,
   };

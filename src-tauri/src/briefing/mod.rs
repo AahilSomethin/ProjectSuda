@@ -1,9 +1,12 @@
 mod linear;
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono_tz::Tz;
 use serde::Serialize;
 
 pub use linear::RawLinearTask;
+
+const DEFAULT_TIMEZONE: &str = "Indian/Maldives";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +21,7 @@ pub struct BriefingFocusTask {
 #[serde(rename_all = "camelCase")]
 pub struct BriefingRawTask {
     pub identifier: String,
+    pub linear_id: String,
     pub title: String,
     pub url: String,
     pub state: String,
@@ -30,6 +34,10 @@ pub struct BriefingRawTask {
     pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub team: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,11 +99,43 @@ fn log_key_presence() {
     log_briefing(format!("linear_api_key_present={linear_present}"));
 }
 
+fn briefing_timezone() -> String {
+    std::env::var("SUDA_TIMEZONE").unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string())
+}
+
+pub fn today_in_timezone(tz_name: &str) -> NaiveDate {
+    let tz: Tz = tz_name
+        .parse()
+        .unwrap_or(chrono_tz::Indian::Maldives);
+    Utc::now().with_timezone(&tz).date_naive()
+}
+
+fn today_for_briefing() -> NaiveDate {
+    today_in_timezone(&briefing_timezone())
+}
+
+fn format_due_label(due_date: &str, today: NaiveDate) -> String {
+    let Some(due) = parse_due_date(due_date) else {
+        return format!("due {due_date}");
+    };
+
+    if due < today {
+        "overdue".to_string()
+    } else if due == today {
+        "due today".to_string()
+    } else if due == today + Duration::days(1) {
+        "due tomorrow".to_string()
+    } else {
+        format!("due {} {}", due.format("%b"), due.day())
+    }
+}
+
 fn map_raw_tasks(tasks: &[RawLinearTask]) -> Vec<BriefingRawTask> {
     tasks
         .iter()
         .map(|task| BriefingRawTask {
             identifier: task.identifier.clone(),
+            linear_id: task.id.clone(),
             title: task.title.clone(),
             url: task.url.clone(),
             state: task.state.clone(),
@@ -104,6 +144,8 @@ fn map_raw_tasks(tasks: &[RawLinearTask]) -> Vec<BriefingRawTask> {
             updated_at: task.updated_at.clone(),
             project: task.project.clone(),
             team: task.team.clone(),
+            description: task.description.clone(),
+            assignee: task.assignee.clone(),
         })
         .collect()
 }
@@ -123,7 +165,7 @@ fn parse_due_date(due_date: &str) -> Option<NaiveDate> {
 }
 
 pub fn compute_stats(tasks: &[RawLinearTask]) -> BriefingStats {
-    let today = Utc::now().date_naive();
+    let today = today_for_briefing();
     let week_end = today + Duration::days(7);
 
     let mut stats = BriefingStats {
@@ -152,10 +194,11 @@ pub fn compute_stats(tasks: &[RawLinearTask]) -> BriefingStats {
 }
 
 fn build_focus_reason(task: &RawLinearTask) -> String {
+    let today = today_for_briefing();
     let mut parts = vec![priority_label(task.priority).to_string()];
 
     if let Some(due_date) = &task.due_date {
-        parts.push(format!("due {due_date}"));
+        parts.push(format_due_label(due_date, today));
     }
 
     parts.push(task.state.clone());
@@ -215,7 +258,7 @@ pub fn build_deterministic_briefing(tasks: &[RawLinearTask]) -> BriefingContent 
         })
         .collect();
 
-    let today = Utc::now().date_naive();
+    let today = today_for_briefing();
     let warnings: Vec<String> = tasks
         .iter()
         .filter_map(|task| {
@@ -349,6 +392,8 @@ mod tests {
             project: project.map(str::to_string),
             team: team.map(str::to_string),
             updated_at: Some("2026-07-08T10:00:00Z".to_string()),
+            description: None,
+            assignee: None,
         }
     }
 
@@ -395,7 +440,7 @@ mod tests {
 
     #[test]
     fn compute_stats_counts_buckets() {
-        let today = Utc::now().date_naive();
+        let today = today_for_briefing();
         let today_str = today.format("%Y-%m-%d").to_string();
         let tomorrow = (today + Duration::days(1)).format("%Y-%m-%d").to_string();
         let last_week = (today - Duration::days(3)).format("%Y-%m-%d").to_string();
@@ -415,5 +460,19 @@ mod tests {
         assert_eq!(stats.due_today, 1);
         assert_eq!(stats.due_this_week, 2);
         assert_eq!(stats.no_due_date, 1);
+    }
+
+    #[test]
+    fn format_due_label_uses_maldives_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 7, 9).expect("date");
+        assert_eq!(format_due_label("2026-07-08", today), "overdue");
+        assert_eq!(format_due_label("2026-07-09", today), "due today");
+        assert_eq!(format_due_label("2026-07-10", today), "due tomorrow");
+    }
+
+    #[test]
+    fn today_in_timezone_defaults_to_maldives() {
+        let today = today_in_timezone("Indian/Maldives");
+        assert!(today.year() >= 2026);
     }
 }
