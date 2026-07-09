@@ -1,42 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { config } from "../config";
 import { useSettings } from "../hooks/useSettings";
+import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
+import { getSudaActivityState } from "../lib/sudaState";
 import {
-  BriefingError,
-  fetchLinearBriefing,
-  formatBriefingMessage,
-  formatBriefingVoiceText,
-  formatNewTasksUpdate,
-  getCachedBriefing,
-} from "../services/briefing";
-import { fetchNewLinearUpdates } from "../services/linear";
-import type { ActiveTransmission, LinearBriefingResponse } from "../types";
+  createBriefingErrorPayload,
+  createBriefingPayload,
+  createCheckingLinearPayload,
+  createIdlePayload,
+  createNewTasksPayload,
+  getTransmissionAutoHideMs,
+} from "../lib/transmissions";
 import SettingsPanel from "./SettingsPanel";
 import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
-
-const SEEN_TASKS_KEY = "suda-seen-task-ids";
-
-const IDLE_MESSAGE = "SUDA online. No active transmission.";
-const CHECKING_LINEAR_MESSAGE = "Checking Linear…";
-const BRIEFING_ERROR_MESSAGE =
-  "Failed to load Linear briefing: I couldn't reach Linear right now. Check your connection and LINEAR_API_KEY, then try again.";
-
-function loadSeenIds(): Set<string> {
-  try {
-    const raw = sessionStorage.getItem(SEEN_TASKS_KEY);
-    if (!raw) return new Set();
-    return new Set(JSON.parse(raw) as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveSeenIds(ids: Set<string>): void {
-  sessionStorage.setItem(SEEN_TASKS_KEY, JSON.stringify([...ids]));
-}
 
 async function positionWindowRightMiddle(): Promise<void> {
   try {
@@ -57,35 +36,6 @@ async function positionWindowRightMiddle(): Promise<void> {
   }
 }
 
-function showBriefingTransmission(
-  briefing: LinearBriefingResponse,
-  showTransmission: ReturnType<typeof useTransmission>["showTransmission"],
-  options?: { voiceEnabled?: boolean; skipIntro?: boolean },
-) {
-  const voiceEnabled = options?.voiceEnabled ?? true;
-  const skipIntro = options?.skipIntro ?? false;
-
-  showTransmission({
-    title: "Morning Briefing",
-    message: formatBriefingMessage(briefing),
-    voiceMessage: formatBriefingVoiceText(briefing),
-    type: "briefing",
-    skipIntro,
-    voiceEnabled,
-    showActions: true,
-  });
-}
-
-function getTransmissionAutoHideMs(transmission: ActiveTransmission): number {
-  if (transmission.message.startsWith("Failed to load Linear briefing")) {
-    return 15_000;
-  }
-  if (transmission.message === IDLE_MESSAGE) {
-    return 8_000;
-  }
-  return 10_000;
-}
-
 export default function SudaWidget() {
   const { settings, updateSetting } = useSettings();
   const {
@@ -95,27 +45,33 @@ export default function SudaWidget() {
     dismissTransmission,
   } = useTransmission(settings);
 
+  const {
+    briefingLoading,
+    briefingError,
+    loadBriefing,
+    pollForUpdates,
+    markTasksSeen,
+    getLatestBriefing,
+  } = useSudaBriefing();
+
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [briefing, setBriefing] = useState<LinearBriefingResponse | null>(null);
-  const [briefingLoading, setBriefingLoading] = useState(false);
-  const [briefingError, setBriefingError] = useState<string | null>(null);
   const [transmissionActivity, setTransmissionActivity] = useState(false);
-  const seenIdsRef = useRef<Set<string>>(loadSeenIds());
-  const pollInitializedRef = useRef(false);
-  const briefingRequestRef = useRef(0);
 
-  const hasActiveTransmission =
-    transmission.phase === "intro" || transmissionActivity;
-
-  const isSudaActive = briefingLoading || hasActiveTransmission;
-
-  const characterImageSrc = useMemo(
+  const sudaActivity = useMemo(
     () =>
-      isSudaActive
-        ? config.characterGifUrl || config.characterIdleImageUrl
-        : config.characterIdleImageUrl || config.characterGifUrl,
-    [isSudaActive],
+      getSudaActivityState({
+        briefingLoading,
+        transmissionPhase: transmission.phase,
+        transmissionActivity,
+      }),
+    [briefingLoading, transmission.phase, transmissionActivity],
   );
+
+  const characterImageSrc = useMemo(() => {
+    const activeSrc = config.characterGifUrl || config.characterIdleImageUrl;
+    const idleSrc = config.characterIdleImageUrl || config.characterGifUrl;
+    return sudaActivity.shouldUseAnimatedGif ? activeSrc : idleSrc;
+  }, [sudaActivity.shouldUseAnimatedGif]);
 
   const handleMessageActivityChange = useCallback((active: boolean) => {
     setTransmissionActivity(active);
@@ -127,118 +83,46 @@ export default function SudaWidget() {
     }
   }, [transmission.phase]);
 
-  const loadBriefing = useCallback(
-    async (options?: { showPopup?: boolean; voiceEnabled?: boolean }) => {
-      const requestId = ++briefingRequestRef.current;
-      setBriefingLoading(true);
-      setBriefingError(null);
-
-      if (options?.showPopup) {
-        showTransmission({
-          title: "Morning Briefing",
-          message: CHECKING_LINEAR_MESSAGE,
-          type: "briefing",
-          skipIntro: true,
-          voiceEnabled: false,
-          showActions: true,
-        });
-      }
-
-      try {
-        const result = await fetchLinearBriefing();
-        if (requestId !== briefingRequestRef.current) return result;
-
-        setBriefing(result);
-        result.rawTasks.forEach((task) => seenIdsRef.current.add(task.identifier));
-        saveSeenIds(seenIdsRef.current);
-
-        if (options?.showPopup) {
-          showBriefingTransmission(result, showTransmission, {
-            voiceEnabled: options.voiceEnabled ?? !settings.muteVoice,
-            skipIntro: true,
-          });
-        }
-
-        return result;
-      } catch (error) {
-        if (requestId !== briefingRequestRef.current) return null;
-
-        const message =
-          error instanceof BriefingError
-            ? error.message
-            : BRIEFING_ERROR_MESSAGE;
-        setBriefingError(message);
-
-        if (options?.showPopup) {
-          showTransmission({
-            title: "Morning Briefing",
-            message: message,
-            type: "briefing",
-            skipIntro: true,
-            voiceEnabled: false,
-            showActions: true,
-          });
-        }
-
-        return null;
-      } finally {
-        if (requestId === briefingRequestRef.current) {
-          setBriefingLoading(false);
-        }
-      }
-    },
-    [settings.muteVoice, showTransmission],
-  );
-
   useEffect(() => {
     positionWindowRightMiddle();
   }, []);
 
+  const showBriefing = useCallback(
+    (voiceEnabled = !settings.muteVoice) => {
+      const latest = getLatestBriefing();
+      if (!latest) return false;
+      showTransmission(createBriefingPayload(latest, { voiceEnabled }));
+      return true;
+    },
+    [getLatestBriefing, settings.muteVoice, showTransmission],
+  );
+
+  const refreshBriefing = useCallback(async () => {
+    showTransmission(createCheckingLinearPayload());
+    const { briefing: result, error } = await loadBriefing();
+    if (result) {
+      showTransmission(
+        createBriefingPayload(result, {
+          voiceEnabled: !settings.muteVoice,
+        }),
+      );
+      return;
+    }
+    if (error) {
+      showTransmission(createBriefingErrorPayload(error));
+    }
+  }, [loadBriefing, settings.muteVoice, showTransmission]);
+
   useEffect(() => {
-    void loadBriefing();
-  }, [loadBriefing]);
-
-  const handleRefreshBriefing = useCallback(async () => {
-    await loadBriefing({
-      showPopup: true,
-      voiceEnabled: !settings.muteVoice,
-    });
-  }, [loadBriefing, settings.muteVoice]);
-
-  const pollForUpdates = useCallback(async () => {
-    try {
-      const updates = await fetchNewLinearUpdates(seenIdsRef.current, true);
-      const cached = getCachedBriefing();
-      if (cached) {
-        setBriefing(cached);
-      }
+    const interval = setInterval(async () => {
+      const updates = await pollForUpdates();
       if (updates.length === 0) return;
+      showTransmission(createNewTasksPayload(updates));
+      markTasksSeen(updates.map((task) => task.id));
+    }, config.linearPollIntervalMs);
 
-      showTransmission({
-        title: "New Transmission",
-        message: formatNewTasksUpdate(updates),
-        type: "update",
-      });
-
-      updates.forEach((t) => seenIdsRef.current.add(t.id));
-      saveSeenIds(seenIdsRef.current);
-    } catch {
-      // Polling should stay quiet when Linear is unavailable.
-    }
-  }, [showTransmission]);
-
-  useEffect(() => {
-    if (!pollInitializedRef.current) {
-      pollInitializedRef.current = true;
-      if (briefing) {
-        briefing.rawTasks.forEach((task) => seenIdsRef.current.add(task.identifier));
-        saveSeenIds(seenIdsRef.current);
-      }
-    }
-
-    const interval = setInterval(pollForUpdates, config.linearPollIntervalMs);
     return () => clearInterval(interval);
-  }, [pollForUpdates, briefing]);
+  }, [markTasksSeen, pollForUpdates, showTransmission]);
 
   const showCharacter =
     !settings.hideCharacter &&
@@ -251,47 +135,18 @@ export default function SudaWidget() {
     }
 
     if (briefingLoading) {
-      showTransmission({
-        title: "Morning Briefing",
-        message: CHECKING_LINEAR_MESSAGE,
-        type: "briefing",
-        skipIntro: true,
-        voiceEnabled: false,
-        showActions: true,
-      });
+      showTransmission(createCheckingLinearPayload());
       return;
     }
 
     if (briefingError) {
-      showTransmission({
-        title: "Morning Briefing",
-        message: briefingError,
-        type: "briefing",
-        skipIntro: true,
-        voiceEnabled: false,
-        showActions: true,
-      });
+      showTransmission(createBriefingErrorPayload(briefingError));
       return;
     }
 
-    const latestBriefing = getCachedBriefing() ?? briefing;
+    if (showBriefing()) return;
 
-    if (latestBriefing) {
-      showBriefingTransmission(latestBriefing, showTransmission, {
-        voiceEnabled: !settings.muteVoice,
-        skipIntro: true,
-      });
-      return;
-    }
-
-    showTransmission({
-      title: "SUDA",
-      message: IDLE_MESSAGE,
-      type: "info",
-      skipIntro: true,
-      voiceEnabled: false,
-      showActions: true,
-    });
+    showTransmission(createIdlePayload());
   };
 
   const handleCompanionClick = () => {
@@ -321,7 +176,7 @@ export default function SudaWidget() {
               {showCharacter ? (
                 <button
                   type="button"
-                  className={`suda-panel__visual${isSudaActive ? " suda-panel__visual--transmitting" : ""}`}
+                  className={`suda-panel__visual${sudaActivity.isSudaActive ? " suda-panel__visual--transmitting" : ""}`}
                   onClick={handleAvatarClick}
                   aria-label="SUDA companion"
                 >
@@ -364,16 +219,12 @@ export default function SudaWidget() {
                 transmission={transmission}
                 disableText={settings.disableText}
                 muteVoice={settings.muteVoice}
-                onRefreshBriefing={handleRefreshBriefing}
+                onRefreshBriefing={refreshBriefing}
                 briefingLoading={briefingLoading}
                 onMessageActivityChange={handleMessageActivityChange}
                 autoHideMs={getTransmissionAutoHideMs(transmission)}
                 onAutoHide={dismissTransmission}
-                isBusy={
-                  briefingLoading ||
-                  transmission.phase === "intro" ||
-                  transmissionActivity
-                }
+                isBusy={sudaActivity.transmissionBusy}
               />
             )}
           </div>

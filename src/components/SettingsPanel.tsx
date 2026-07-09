@@ -1,5 +1,4 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { PERSONALITY_MODES } from "../types";
 import type { WidgetSettings } from "../types";
 
 interface SettingsPanelProps {
@@ -66,7 +65,7 @@ export default function SettingsPanel({
           onChange={(v) => onUpdate("muteVoice", v)}
         />
         <Toggle
-          label="Disable text"
+          label="Hide text"
           checked={settings.disableText}
           onChange={(v) => onUpdate("disableText", v)}
         />
@@ -75,26 +74,6 @@ export default function SettingsPanel({
           checked={settings.hideCharacter}
           onChange={(v) => onUpdate("hideCharacter", v)}
         />
-
-        <div className="suda-settings__row">
-          <span className="suda-settings__label">Personality</span>
-          <select
-            className="suda-settings__select"
-            value={settings.personality}
-            onChange={(e) =>
-              onUpdate(
-                "personality",
-                e.target.value as WidgetSettings["personality"],
-              )
-            }
-          >
-            {PERSONALITY_MODES.map((mode) => (
-              <option key={mode} value={mode}>
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-              </option>
-            ))}
-          </select>
-        </div>
       </div>
 
       <div className="suda-settings__footer">

@@ -2,29 +2,6 @@ export type TransmissionType = "task" | "meeting" | "update" | "info" | "briefin
 
 export type TransmissionPhase = "idle" | "intro" | "message";
 
-export type PersonalityMode =
-  | "gentle"
-  | "focused"
-  | "strict"
-  | "bitchy"
-  | "stubborn"
-  | "cheerful"
-  | "deadpan"
-  | "motivational"
-  | "chaotic";
-
-export const PERSONALITY_MODES: PersonalityMode[] = [
-  "gentle",
-  "focused",
-  "strict",
-  "bitchy",
-  "stubborn",
-  "cheerful",
-  "deadpan",
-  "motivational",
-  "chaotic",
-];
-
 export interface LinearTask {
   id: string;
   title: string;
@@ -72,14 +49,6 @@ export interface LinearBriefingResponse {
   rawTasks: BriefingRawTask[];
 }
 
-export interface CalendarMeeting {
-  id: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  description?: string;
-}
-
 export interface TransmissionPayload {
   title: string;
   message: string;
@@ -98,7 +67,6 @@ export interface WidgetSettings {
   muteVoice: boolean;
   disableText: boolean;
   hideCharacter: boolean;
-  personality: PersonalityMode;
 }
 
 export interface ActiveTransmission extends TransmissionPayload {
