@@ -1,47 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getCurrentWindow, currentMonitor, PhysicalPosition } from "@tauri-apps/api/window";
 import { config } from "../config";
+import { usePanelReveal } from "../hooks/usePanelReveal";
 import { useSettings } from "../hooks/useSettings";
 import { useSudaBriefing } from "../hooks/useSudaBriefing";
 import { useTransmission } from "../hooks/useTransmission";
 import { getSudaActivityState, type TransmissionActivity } from "../lib/sudaState";
 import {
-  primeBrowserSpeechForFallback,
-  unlockAudioPlayback,
-} from "../services/voice";
-import {
   createBriefingErrorPayload,
   createBriefingPayload,
   createCheckingLinearPayload,
-  createIdlePayload,
+  createSummonedIdlePayload,
   createNewTasksPayload,
   getTransmissionAutoHideMs,
 } from "../lib/transmissions";
+import { setWindowMode } from "../lib/windowMode";
+import {
+  primeBrowserSpeechForFallback,
+  unlockAudioPlayback,
+} from "../services/voice";
 import SettingsPanel from "./SettingsPanel";
+import SudaControlMenu from "./SudaControlMenu";
 import TransmissionPopup from "./TransmissionPopup";
 import "./widget.css";
 
 const SUDA_GIF_SRC = config.characterGifUrl || "/suda.gif";
 const SUDA_IDLE_SRC = config.characterIdleImageUrl || "/suda-idle.png";
-
-async function positionWindowRightMiddle(): Promise<void> {
-  try {
-    const appWindow = getCurrentWindow();
-    const monitor = await currentMonitor();
-    if (!monitor) return;
-
-    const size = await appWindow.innerSize();
-    const { workArea } = monitor;
-    const x = workArea.position.x + workArea.size.width - size.width;
-    const y =
-      workArea.position.y +
-      Math.floor((workArea.size.height - size.height) / 2);
-
-    await appWindow.setPosition(new PhysicalPosition(x, y));
-  } catch {
-    // Not running in Tauri (e.g. browser preview) — skip positioning
-  }
-}
 
 export default function SudaWidget() {
   const { settings, updateSetting } = useSettings();
@@ -54,19 +37,37 @@ export default function SudaWidget() {
 
   const {
     briefingLoading,
-    briefingError,
     loadBriefing,
     pollForUpdates,
     markTasksSeen,
-    getLatestBriefing,
   } = useSudaBriefing();
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isManuallySummoned, setIsManuallySummoned] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sudaVisualState, setSudaVisualState] = useState<"idle" | "active">(
     "idle",
   );
+
+  const hasActiveTransmission = transmission.phase !== "idle";
+  const shouldShowPanel = hasActiveTransmission || isManuallySummoned;
+
+  const handlePanelCloseComplete = useCallback(() => {
+    dismissTransmission();
+    setIsManuallySummoned(false);
+  }, [dismissTransmission]);
+
+  const {
+    panelReveal,
+    panelMounted,
+    edgeExpanded,
+    contentVisible,
+    dismissPanel,
+  } = usePanelReveal({
+    shouldShowPanel,
+    onCloseComplete: handlePanelCloseComplete,
+  });
 
   const sudaActivity = useMemo(
     () =>
@@ -102,19 +103,9 @@ export default function SudaWidget() {
   }, [transmission.phase]);
 
   useEffect(() => {
-    positionWindowRightMiddle();
+    void setWindowMode("compact");
     primeBrowserSpeechForFallback();
   }, []);
-
-  const showBriefing = useCallback(
-    (voiceEnabled = !settings.muteVoice) => {
-      const latest = getLatestBriefing();
-      if (!latest) return false;
-      showTransmission(createBriefingPayload(latest, { voiceEnabled }));
-      return true;
-    },
-    [getLatestBriefing, settings.muteVoice, showTransmission],
-  );
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
@@ -144,121 +135,129 @@ export default function SudaWidget() {
     return () => clearInterval(interval);
   }, [markTasksSeen, pollForUpdates, showTransmission]);
 
+  const summonSuda = useCallback(() => {
+    void unlockAudioPlayback();
+    setIsManuallySummoned(true);
+    if (!hasActiveTransmission) {
+      showTransmission(createSummonedIdlePayload());
+    }
+  }, [hasActiveTransmission, showTransmission]);
+
+  const dismissSuda = useCallback(() => {
+    dismissPanel();
+  }, [dismissPanel]);
+
+  const handleAutoHide = useCallback(() => {
+    if (isManuallySummoned) {
+      showTransmission(createSummonedIdlePayload());
+      return;
+    }
+    dismissPanel();
+  }, [dismissPanel, isManuallySummoned, showTransmission]);
+
   const showCharacter =
-    !settings.hideCharacter &&
-    (transmission.characterVisible ?? true);
+    !settings.hideCharacter && (transmission.characterVisible ?? true);
 
-  const handleAvatarClick = () => {
-    void unlockAudioPlayback();
-
-    if (isExpanded) {
-      dismissTransmission();
-      return;
-    }
-
-    if (briefingLoading) {
-      showTransmission(createCheckingLinearPayload());
-      return;
-    }
-
-    if (briefingError) {
-      showTransmission(createBriefingErrorPayload(briefingError));
-      return;
-    }
-
-    if (showBriefing()) return;
-
-    showTransmission(createIdlePayload());
-  };
-
-  const handleCompanionClick = () => {
-    void unlockAudioPlayback();
-
-    if (settingsOpen) {
-      setSettingsOpen(false);
-      return;
-    }
-    handleAvatarClick();
-  };
+  const panelClassName = [
+    "suda-panel",
+    panelReveal === "opening" ? "suda-panel--opening" : "",
+    panelReveal === "open" ? "suda-panel--open" : "",
+    panelReveal === "closing" ? "suda-panel--closing" : "",
+    edgeExpanded ? "suda-panel--edges-expanded" : "",
+    contentVisible ? "suda-panel--content-visible" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div className="suda-widget">
-      <div className="suda-widget__inner">
-        <div className="suda-panel">
-          {settingsOpen && (
-            <SettingsPanel
-              settings={settings}
-              onUpdate={updateSetting}
-              onClose={() => setSettingsOpen(false)}
-            />
-          )}
+      <SudaControlMenu
+        panelVisible={panelMounted}
+        briefingLoading={briefingLoading}
+        settingsOpen={settingsOpen}
+        onSummon={summonSuda}
+        onDismiss={dismissSuda}
+        onRefreshBriefing={refreshBriefing}
+        onOpenSettings={() => {
+          void unlockAudioPlayback();
+          setSettingsOpen(true);
+        }}
+        onCloseSettings={() => setSettingsOpen(false)}
+      />
 
-          <div className="suda-panel__edge suda-panel__edge--top" aria-hidden="true" />
+      {settingsOpen && (
+        <SettingsPanel
+          settings={settings}
+          onUpdate={updateSetting}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
 
-          <div className="suda-panel__content">
-            <div className="suda-panel__visual-wrap">
-              {showCharacter ? (
-                <button
-                  type="button"
-                  className={`suda-panel__visual${sudaActivity.isSudaActive ? " suda-panel__visual--transmitting" : ""}`}
-                  onClick={handleAvatarClick}
-                  aria-label="SUDA companion"
-                >
-                  {characterImageSrc ? (
-                    <img
-                      className="suda-panel__visual-img"
-                      src={characterImageSrc}
-                      alt="SUDA"
-                    />
-                  ) : (
-                    <span className="suda-panel__visual-fallback">S</span>
-                  )}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="suda-panel__visual suda-panel__visual--compact"
-                  onClick={handleCompanionClick}
-                  aria-label="Open SUDA panel"
-                >
-                  ◈
-                </button>
-              )}
+      {panelMounted && (
+        <div className="suda-widget__inner">
+          <div className={panelClassName}>
+            <button
+              type="button"
+              className="suda-panel__dismiss"
+              onClick={dismissSuda}
+              aria-label="Dismiss SUDA"
+            >
+              ×
+            </button>
 
-              <div className="suda-panel__visual-shade" aria-hidden="true" />
-              <span className="suda-panel__label">SUDA</span>
+            <div className="suda-panel__edge suda-panel__edge--top" aria-hidden="true" />
 
-              <button
-                type="button"
-                className="suda-panel__settings"
-                onClick={() => {
-                  void unlockAudioPlayback();
-                  setSettingsOpen((v) => !v);
-                }}
-                aria-label="Settings"
-              >
-                ⚙
-              </button>
+            <div className="suda-panel__content">
+              <div className="suda-panel__visual-wrap">
+                {showCharacter ? (
+                  <div
+                    className={`suda-panel__visual${sudaActivity.isSudaActive ? " suda-panel__visual--transmitting" : ""}`}
+                    aria-hidden="true"
+                  >
+                    {characterImageSrc ? (
+                      <img
+                        className="suda-panel__visual-img"
+                        src={characterImageSrc}
+                        alt=""
+                      />
+                    ) : (
+                      <span className="suda-panel__visual-fallback">S</span>
+                    )}
+                  </div>
+                ) : (
+                  <div
+                    className="suda-panel__visual suda-panel__visual--compact"
+                    aria-hidden="true"
+                  >
+                    ◈
+                  </div>
+                )}
+
+                <div className="suda-panel__visual-shade" aria-hidden="true" />
+                <span className="suda-panel__label">SUDA</span>
+              </div>
+
+              {panelReveal === "open" &&
+                isExpanded &&
+                transmission.phase !== "idle" && (
+                  <TransmissionPopup
+                    transmission={transmission}
+                    disableText={settings.disableText}
+                    muteVoice={settings.muteVoice}
+                    onTransmissionActivityChange={
+                      handleTransmissionActivityChange
+                    }
+                    autoHideMs={getTransmissionAutoHideMs(transmission)}
+                    onAutoHide={handleAutoHide}
+                    isBusy={sudaActivity.transmissionBusy}
+                  />
+                )}
             </div>
 
-            {isExpanded && transmission.phase !== "idle" && (
-              <TransmissionPopup
-                transmission={transmission}
-                disableText={settings.disableText}
-                muteVoice={settings.muteVoice}
-                onRefreshBriefing={refreshBriefing}
-                briefingLoading={briefingLoading}
-                onTransmissionActivityChange={handleTransmissionActivityChange}
-                autoHideMs={getTransmissionAutoHideMs(transmission)}
-                onAutoHide={dismissTransmission}
-                isBusy={sudaActivity.transmissionBusy}
-              />
-            )}
+            <div className="suda-panel__edge suda-panel__edge--bottom" aria-hidden="true" />
           </div>
-
-          <div className="suda-panel__edge suda-panel__edge--bottom" aria-hidden="true" />
         </div>
-      </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,7 @@ interface SettingsPanelProps {
     value: WidgetSettings[K],
   ) => void;
   onClose: () => void;
+  className?: string;
 }
 
 function Toggle({
@@ -40,16 +41,25 @@ export default function SettingsPanel({
   settings,
   onUpdate,
   onClose,
+  className,
 }: SettingsPanelProps) {
   async function handleExit() {
     await getCurrentWindow().close();
   }
 
   return (
-    <div className="suda-settings" role="dialog" aria-label="Settings">
+    <div
+      className={`suda-settings suda-settings--fab${className ? ` ${className}` : ""}`}
+      role="dialog"
+      aria-label="Settings"
+    >
       <div className="suda-settings__header">
-        <h3 className="suda-settings__title">Settings</h3>
+        <div className="suda-settings__heading">
+          <h3 className="suda-settings__title">Settings</h3>
+          <p className="suda-settings__subtitle">Companion preferences</p>
+        </div>
         <button
+          type="button"
           className="suda-popup__close"
           onClick={onClose}
           aria-label="Close settings"
@@ -79,8 +89,7 @@ export default function SettingsPanel({
       <div className="suda-settings__footer">
         <button
           type="button"
-          className="suda-btn suda-btn--danger"
-          style={{ width: "100%" }}
+          className="suda-btn suda-btn--danger suda-btn--block"
           onClick={handleExit}
         >
           Exit widget

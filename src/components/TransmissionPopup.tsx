@@ -35,8 +35,6 @@ interface TransmissionPopupProps {
   transmission: ActiveTransmission;
   disableText: boolean;
   muteVoice: boolean;
-  onRefreshBriefing?: () => void;
-  briefingLoading?: boolean;
   onTransmissionActivityChange?: (activity: TransmissionActivity) => void;
   autoHideMs?: number;
   onAutoHide?: () => void;
@@ -168,14 +166,12 @@ export default function TransmissionPopup({
   transmission,
   disableText,
   muteVoice,
-  onRefreshBriefing,
-  briefingLoading,
   onTransmissionActivityChange,
   autoHideMs,
   onAutoHide,
   isBusy = false,
 }: TransmissionPopupProps) {
-  const { phase, message, voiceMessage, skipIntro, showActions, voiceEnabled } =
+  const { phase, message, voiceMessage, skipIntro, voiceEnabled } =
     transmission;
 
   const [isHovered, setIsHovered] = useState(false);
@@ -271,19 +267,6 @@ export default function TransmissionPopup({
           />
         )}
       </div>
-
-      {showActions && onRefreshBriefing && (
-        <div className="suda-popup__footer">
-          <button
-            type="button"
-            className="suda-btn"
-            disabled={briefingLoading}
-            onClick={onRefreshBriefing}
-          >
-            {briefingLoading ? "Checking Linear…" : "Refresh Briefing"}
-          </button>
-        </div>
-      )}
     </div>
   );
 }

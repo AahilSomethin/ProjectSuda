@@ -59,8 +59,8 @@ export interface TransmissionPayload {
   characterVisible?: boolean;
   /** Skip the 3s GIF intro — used for idle/empty status messages */
   skipIntro?: boolean;
-  /** Show action buttons in the status popup (e.g. Refresh Briefing) */
-  showActions?: boolean;
+  /** Keep visible until user explicitly dismisses (no auto-hide) */
+  persistUntilDismissed?: boolean;
 }
 
 export interface WidgetSettings {

@@ -11,7 +11,7 @@ import type {
 } from "../types";
 
 export const SUDA_MESSAGES = {
-  idle: "SUDA online. No active transmission.",
+  idle: "SUDA standing by.",
   checkingLinear: "Checking Linear…",
   briefingError:
     "Failed to load Linear briefing: I couldn't reach Linear right now. Check your connection and LINEAR_API_KEY, then try again.",
@@ -34,7 +34,6 @@ export function createBriefingPayload(
     type: "briefing",
     skipIntro: options?.skipIntro ?? true,
     voiceEnabled: options?.voiceEnabled ?? true,
-    showActions: true,
   };
 }
 
@@ -45,7 +44,6 @@ export function createCheckingLinearPayload(): TransmissionPayload {
     type: "briefing",
     skipIntro: true,
     voiceEnabled: true,
-    showActions: true,
   };
 }
 
@@ -56,7 +54,6 @@ export function createBriefingErrorPayload(message: string): TransmissionPayload
     type: "briefing",
     skipIntro: true,
     voiceEnabled: true,
-    showActions: true,
   };
 }
 
@@ -67,7 +64,17 @@ export function createIdlePayload(): TransmissionPayload {
     type: "info",
     skipIntro: true,
     voiceEnabled: true,
-    showActions: true,
+  };
+}
+
+export function createSummonedIdlePayload(): TransmissionPayload {
+  return {
+    title: "SUDA",
+    message: SUDA_MESSAGES.idle,
+    type: "info",
+    skipIntro: true,
+    voiceEnabled: true,
+    persistUntilDismissed: true,
   };
 }
 
@@ -82,7 +89,10 @@ export function createNewTasksPayload(tasks: LinearTask[]): TransmissionPayload 
 
 export function getTransmissionAutoHideMs(
   transmission: ActiveTransmission,
-): number {
+): number | undefined {
+  if (transmission.persistUntilDismissed) {
+    return undefined;
+  }
   if (transmission.message.startsWith("Failed to load Linear briefing")) {
     return AUTO_HIDE_MS.error;
   }

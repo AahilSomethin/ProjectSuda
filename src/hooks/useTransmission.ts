@@ -51,7 +51,6 @@ export function useTransmission(settings: WidgetSettings) {
         skipIntro,
         voiceEnabled,
         characterVisible: payload.characterVisible ?? true,
-        showActions: payload.showActions ?? false,
         phase: skipIntro ? "message" : "intro",
       };
 
