@@ -7,11 +7,7 @@ import { useTransmission } from "../hooks/useTransmission";
 import { devLog } from "../lib/devLog";
 import { getSudaActivityState, type TransmissionActivity } from "../lib/sudaState";
 import {
-  createBriefingErrorPayload,
-  createBriefingPayload,
-  createCheckingLinearPayload,
   createSummonedIdlePayload,
-  createStartupBriefingPayload,
   getTransmissionAutoHideMs,
 } from "../lib/transmissions";
 import { setSettingsOverlay, setWindowMode } from "../lib/windowMode";
@@ -42,9 +38,6 @@ export default function SudaWidget() {
   const {
     briefing,
     briefingLoading,
-    loadBriefing,
-    establishBaseline,
-    evaluateStartupImportance,
     startupHandledRef,
   } = useSudaBriefing();
 
@@ -83,9 +76,11 @@ export default function SudaWidget() {
     (payload: TransmissionPayload) => {
       pendingSettingsOpenRef.current = false;
       setSettingsOpen(false);
+      const voiceEnabled =
+        payload.voiceEnabled === true && !settings.muteVoice;
       showTransmission({
         ...payload,
-        voiceEnabled: payload.voiceEnabled ?? !settings.muteVoice,
+        voiceEnabled,
       });
     },
     [settings.muteVoice, showTransmission],
@@ -188,46 +183,14 @@ export default function SudaWidget() {
 
     startupHandledRef.current = true;
     const tasks = briefingToLinearTasks(briefing);
-    establishBaseline(tasks);
-
-    if (evaluateStartupImportance(briefing)) {
-      presentTransmission(
-        createStartupBriefingPayload(briefing, {
-          voiceEnabled: !settings.muteVoice,
-        }),
-      );
-      devLog("[SUDA] transmission opened");
-    } else {
-      devLog("[SUDA] startup calm — no transmission");
-    }
-  }, [
-    briefing,
-    establishBaseline,
-    evaluateStartupImportance,
-    settings.muteVoice,
-    presentTransmission,
-    startupHandledRef,
-  ]);
+    integrationMonitor.establishBaselineFromTasks(tasks);
+    devLog("[SUDA] startup baseline established — no transmission");
+  }, [briefing, startupHandledRef]);
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();
-    presentTransmission(createCheckingLinearPayload());
-    const { briefing: result, error } = await loadBriefing();
-    if (result) {
-      const tasks = briefingToLinearTasks(result);
-      establishBaseline(tasks);
-      presentTransmission(
-        createBriefingPayload(result, {
-          voiceEnabled: !settings.muteVoice,
-        }),
-      );
-      devLog("[SUDA] transmission opened");
-      return;
-    }
-    if (error) {
-      presentTransmission(createBriefingErrorPayload(error));
-    }
-  }, [establishBaseline, loadBriefing, presentTransmission, settings.muteVoice]);
+    await integrationMonitor.refreshIntegrations();
+  }, []);
 
   const handleRetryLinear = useCallback(() => {
     void integrationMonitor.retryLinear();
@@ -369,6 +332,7 @@ export default function SudaWidget() {
                     transmission={transmission}
                     disableText={settings.disableText}
                     muteVoice={settings.muteVoice}
+                    fallbackVoice={settings.fallbackVoice}
                     onTransmissionActivityChange={
                       handleTransmissionActivityChange
                     }

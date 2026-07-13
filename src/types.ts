@@ -66,6 +66,7 @@ export type GitHubActivity =
 export interface GitHubMonitorState {
   processedEventIds: string[];
   branchHeads: Record<string, string>;
+  prSnapshots?: Record<string, string>;
   lastSuccessfulPollAt: string | null;
   baselineEstablished?: boolean;
 }
@@ -164,6 +165,7 @@ export interface TransmissionPayload {
 
 export interface WidgetSettings {
   muteVoice: boolean;
+  fallbackVoice: boolean;
   disableText: boolean;
   hideCharacter: boolean;
 }

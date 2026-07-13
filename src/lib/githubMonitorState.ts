@@ -5,6 +5,7 @@ const STORAGE_KEY = "suda-github-monitor-state";
 export const EMPTY_GITHUB_MONITOR_STATE = {
   processedEventIds: [] as string[],
   branchHeads: {} as Record<string, string>,
+  prSnapshots: {} as Record<string, string>,
   lastSuccessfulPollAt: null as string | null,
   baselineEstablished: false,
 };
@@ -21,6 +22,7 @@ export function loadGitHubMonitorState() {
     return {
       processedEventIds: parsed.processedEventIds ?? [],
       branchHeads: parsed.branchHeads ?? {},
+      prSnapshots: parsed.prSnapshots ?? {},
       lastSuccessfulPollAt: parsed.lastSuccessfulPollAt ?? null,
       baselineEstablished: parsed.baselineEstablished ?? false,
     };

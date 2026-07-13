@@ -5,6 +5,7 @@ const STORAGE_KEY = "suda-settings";
 
 const DEFAULT_SETTINGS: WidgetSettings = {
   muteVoice: false,
+  fallbackVoice: false,
   disableText: false,
   hideCharacter: false,
 };
@@ -17,6 +18,7 @@ function loadSettings(): WidgetSettings {
     const parsed = JSON.parse(raw) as Partial<WidgetSettings>;
     return {
       muteVoice: parsed.muteVoice ?? DEFAULT_SETTINGS.muteVoice,
+      fallbackVoice: parsed.fallbackVoice ?? DEFAULT_SETTINGS.fallbackVoice,
       disableText: parsed.disableText ?? DEFAULT_SETTINGS.disableText,
       hideCharacter: parsed.hideCharacter ?? DEFAULT_SETTINGS.hideCharacter,
     };

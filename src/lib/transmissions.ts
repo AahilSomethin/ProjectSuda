@@ -13,7 +13,7 @@ import type {
 import type { TaskChange } from "./taskChanges";
 
 export const SUDA_MESSAGES = {
-  idle: "SUDA standing by.",
+  idle: "No active transmission",
   checkingLinear: "Checking Linear…",
   briefingError:
     "Failed to load Linear briefing: I couldn't reach Linear right now. Check your connection and LINEAR_API_KEY, then try again.",
@@ -37,7 +37,7 @@ export function createBriefingPayload(
     voiceMessage: formatBriefingVoiceText(briefing),
     type: "briefing",
     skipIntro: options?.skipIntro ?? true,
-    voiceEnabled: options?.voiceEnabled ?? true,
+    voiceEnabled: options?.voiceEnabled ?? false,
   };
 }
 
@@ -46,7 +46,7 @@ export function createStartupBriefingPayload(
   options?: { voiceEnabled?: boolean },
 ): TransmissionPayload {
   return createBriefingPayload(briefing, {
-    voiceEnabled: options?.voiceEnabled ?? true,
+    voiceEnabled: options?.voiceEnabled ?? false,
     skipIntro: true,
   });
 }
@@ -57,7 +57,7 @@ export function createCheckingLinearPayload(): TransmissionPayload {
     message: SUDA_MESSAGES.checkingLinear,
     type: "briefing",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
   };
 }
 
@@ -67,7 +67,7 @@ export function createBriefingErrorPayload(message: string): TransmissionPayload
     message,
     type: "briefing",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
   };
 }
 
@@ -77,23 +77,26 @@ export function createSummonedIdlePayload(): TransmissionPayload {
     message: SUDA_MESSAGES.idle,
     type: "info",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: false,
     persistUntilDismissed: true,
   };
 }
 
-export function createCombinedBriefingPayload(briefing: {
-  title: string;
-  message: string;
-  voiceMessage: string;
-}): TransmissionPayload {
+export function createCombinedBriefingPayload(
+  briefing: {
+    title: string;
+    message: string;
+    voiceMessage: string;
+  },
+  options?: { voiceEnabled?: boolean },
+): TransmissionPayload {
   return {
     title: briefing.title,
     message: briefing.message,
     voiceMessage: briefing.voiceMessage,
-    type: "github",
+    type: "update",
     skipIntro: true,
-    voiceEnabled: true,
+    voiceEnabled: options?.voiceEnabled ?? true,
   };
 }
 
@@ -101,7 +104,7 @@ export function createTaskChangesPayload(
   changes: TaskChange[],
 ): TransmissionPayload {
   return {
-    title: "New Transmission",
+    title: "SUDA",
     message: formatTaskChangesUpdate(changes),
     voiceMessage: formatTaskChangesVoiceText(changes),
     type: "update",

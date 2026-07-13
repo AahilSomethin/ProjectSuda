@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct GitHubMonitorState {
     pub processed_event_ids: Vec<String>,
     pub branch_heads: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub pr_snapshots: std::collections::HashMap<String, String>,
     pub last_successful_poll_at: Option<String>,
     #[serde(default)]
     pub baseline_established: bool,
@@ -132,10 +134,9 @@ pub fn format_activity_message(activity: &GitHubActivity) -> String {
         }
         GitHubActivity::PullRequestUpdated {
             pull_request_number,
-            title,
             action,
             ..
-        } => format!("Pull request #{pull_request_number} was {action}: {title}."),
+        } => format!("Pull request #{pull_request_number} was {action}."),
     }
 }
 

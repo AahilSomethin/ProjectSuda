@@ -103,12 +103,7 @@ export function detectTaskChanges(
       continue;
     }
 
-    if (updatedAtChanged && existing.announcedUpdatedAt !== task.updatedAt) {
-      changes.push({
-        kind: "updated",
-        task,
-        changes: ["activity updated"],
-      });
+    if (updatedAtChanged) {
       nextCache.snapshots[task.id] = {
         ...snapshot,
         announcedUpdatedAt: task.updatedAt,

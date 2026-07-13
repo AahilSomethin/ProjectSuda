@@ -1,10 +1,12 @@
 import {
   detectTaskChanges,
   getInitialTaskCache,
+  markBaselineFromTasks,
   persistTaskCache,
   type TaskChange,
 } from "../lib/taskChanges";
 import type { TaskCacheState } from "../lib/taskCache";
+import { loadTaskCache } from "../lib/taskCache";
 import {
   buildCombinedBriefing,
   createBriefingEvents,
@@ -32,6 +34,7 @@ import type {
   GitHubMonitorState,
   IntegrationStatus,
   IntegrationViewStatus,
+  LinearTask,
   TransmissionPayload,
 } from "../types";
 
@@ -50,7 +53,6 @@ interface IntegrationRuntime {
   status: IntegrationStatus;
   lastSuccessfulPollAt: string | null;
   failureCount: number;
-  timerId: ReturnType<typeof setTimeout> | null;
   pollInFlight: boolean;
   authFailed: boolean;
   disabled: boolean;
@@ -63,7 +65,6 @@ function defaultRuntime(intervalMs: number): IntegrationRuntime {
     status: "disabled",
     lastSuccessfulPollAt: null,
     failureCount: 0,
-    timerId: null,
     pollInFlight: false,
     authFailed: false,
     disabled: false,
@@ -77,6 +78,7 @@ class IntegrationMonitorService {
   private onStatusChange: StatusHandler | null = null;
   private linear = defaultRuntime(60_000);
   private github = defaultRuntime(60_000);
+  private unifiedTimerId: ReturnType<typeof setTimeout> | null = null;
   private taskCache: TaskCacheState = getInitialTaskCache();
   private githubState: GitHubMonitorState = loadGitHubMonitorState();
   private announcedWarnings = new Set<string>();
@@ -94,8 +96,7 @@ class IntegrationMonitorService {
   }
 
   stop(): void {
-    this.clearTimer("linear");
-    this.clearTimer("github");
+    this.clearUnifiedTimer();
     this.started = false;
     this.onTransmission = null;
     this.onStatusChange = null;
@@ -118,12 +119,25 @@ class IntegrationMonitorService {
     ];
   }
 
+  syncTaskCache(state: TaskCacheState): void {
+    this.taskCache = state;
+    persistTaskCache(state);
+  }
+
+  establishBaselineFromTasks(tasks: LinearTask[]): void {
+    this.taskCache = markBaselineFromTasks(this.taskCache, tasks);
+  }
+
   async retryLinear(): Promise<void> {
     await this.manualRetry("linear");
   }
 
   async checkGitHubNow(): Promise<void> {
     await this.manualRetry("github");
+  }
+
+  async refreshIntegrations(): Promise<void> {
+    await this.manualRetry("unified");
   }
 
   private async initialize(): Promise<void> {
@@ -137,129 +151,123 @@ class IntegrationMonitorService {
       this.github.disabled = true;
     }
 
-    const linearKeyConfigured = await this.probeLinearConfigured();
-    if (linearKeyConfigured) {
-      this.linear.disabled = false;
-      this.linear.status = "connecting";
-    } else {
-      this.linear.status = "disabled";
-      this.linear.disabled = true;
-    }
+    this.linear.disabled = false;
+    this.linear.status = "connecting";
 
     this.emitStatus();
-    await this.runLinearPollCycle();
-    await this.runGitHubPollCycle();
-    this.scheduleNext("linear");
-    this.scheduleNext("github");
+    await this.runUnifiedPollCycle();
+    this.scheduleNext();
   }
 
-  private async probeLinearConfigured(): Promise<boolean> {
-    try {
-      const result = await fetchLinearPoll();
-      return result.status !== "disabled";
-    } catch {
-      return false;
+  private async manualRetry(
+    integration: "linear" | "github" | "unified",
+  ): Promise<void> {
+    if (integration === "linear" || integration === "unified") {
+      this.linear.authFailed = false;
+      this.linear.failureCount = 0;
+      this.linear.disabled = false;
+      resetIntegrationLog("linear");
     }
-  }
 
-  private async manualRetry(integration: "linear" | "github"): Promise<void> {
-    const runtime = integration === "linear" ? this.linear : this.github;
-    runtime.authFailed = false;
-    runtime.failureCount = 0;
-    runtime.disabled = false;
-    resetIntegrationLog(integration);
-    this.clearTimer(integration);
+    if (integration === "github" || integration === "unified") {
+      this.github.authFailed = false;
+      this.github.failureCount = 0;
+      this.github.disabled = false;
+      resetIntegrationLog("github");
+    }
+
+    this.clearUnifiedTimer();
     await reloadIntegrationEnv();
 
-    if (integration === "github") {
-      const status = await fetchGitHubStatus();
-      runtime.intervalMs = status.pollIntervalSeconds * 1000;
-      runtime.disabled = !status.configured;
+    const githubStatus = await fetchGitHubStatus();
+    this.github.intervalMs = githubStatus.pollIntervalSeconds * 1000;
+    this.github.disabled = !githubStatus.configured;
+    if (!githubStatus.configured) {
+      this.github.status = "disabled";
     }
 
-    if (integration === "github") {
-      const status = await fetchGitHubStatus();
-      runtime.intervalMs = status.pollIntervalSeconds * 1000;
-      runtime.disabled = !status.configured;
-      await this.runGitHubPollCycle();
-    } else {
-      await this.runLinearPollCycle();
-    }
-
-    if (runtime.status === "connected") {
-      this.scheduleNext(integration);
-    }
+    await this.runUnifiedPollCycle();
+    this.scheduleNext();
     this.emitStatus();
   }
 
-  private scheduleNext(integration: "linear" | "github"): void {
-    const runtime = integration === "linear" ? this.linear : this.github;
-    this.clearTimer(integration);
+  private getUnifiedIntervalMs(): number {
+    const intervals: number[] = [];
+    if (!this.linear.disabled && !this.linear.authFailed) {
+      intervals.push(this.linear.intervalMs);
+    }
+    if (!this.github.disabled && !this.github.authFailed) {
+      intervals.push(this.github.intervalMs);
+    }
+    return intervals.length > 0 ? Math.max(...intervals) : 60_000;
+  }
 
-    if (runtime.disabled || runtime.authFailed) return;
+  private getUnifiedBackoffMs(): number {
+    const baseInterval = this.getUnifiedIntervalMs();
+    const failureCounts: number[] = [];
+    if (!this.linear.disabled && !this.linear.authFailed) {
+      failureCounts.push(this.linear.failureCount);
+    }
+    if (!this.github.disabled && !this.github.authFailed) {
+      failureCounts.push(this.github.failureCount);
+    }
+    const maxFailures =
+      failureCounts.length > 0 ? Math.max(...failureCounts) : 0;
+    return getBackoffDelayMs(maxFailures, baseInterval);
+  }
 
-    const delay =
-      runtime.failureCount === 0
-        ? runtime.intervalMs
-        : BACKOFF_MS[Math.min(runtime.failureCount - 1, BACKOFF_MS.length - 1)];
+  private scheduleNext(): void {
+    this.clearUnifiedTimer();
 
-    runtime.timerId = setTimeout(() => {
-      const poll =
-        integration === "linear"
-          ? () => this.runLinearPollCycle()
-          : () => this.runGitHubPollCycle();
-      void poll().then(() => this.scheduleNext(integration));
+    const linearActive = !this.linear.disabled && !this.linear.authFailed;
+    const githubActive = !this.github.disabled && !this.github.authFailed;
+    if (!linearActive && !githubActive) return;
+
+    const delay = this.getUnifiedBackoffMs();
+
+    this.unifiedTimerId = setTimeout(() => {
+      void this.runUnifiedPollCycle().then(() => this.scheduleNext());
     }, delay);
   }
 
-  private clearTimer(integration: "linear" | "github"): void {
-    const runtime = integration === "linear" ? this.linear : this.github;
-    if (runtime.timerId !== null) {
-      clearTimeout(runtime.timerId);
-      runtime.timerId = null;
+  private clearUnifiedTimer(): void {
+    if (this.unifiedTimerId !== null) {
+      clearTimeout(this.unifiedTimerId);
+      this.unifiedTimerId = null;
     }
   }
 
-  private async runLinearPollCycle(): Promise<void> {
-    if (this.linear.disabled || this.linear.authFailed) return;
+  private async runUnifiedPollCycle(): Promise<void> {
+    const linearChanges = this.linear.disabled || this.linear.authFailed
+      ? []
+      : await this.pollLinear();
+    const githubActivities = this.github.disabled || this.github.authFailed
+      ? []
+      : await this.pollGitHub();
 
-    const linearChanges = await this.pollLinear();
-    const warnings: Array<{ message: string; key: string }> = [];
-
-    if (this.linear.authFailed && !this.announcedWarnings.has("linear-auth-failed")) {
-      this.announcedWarnings.add("linear-auth-failed");
-      warnings.push({ message: LINEAR_AUTH_WARNING, key: "linear-auth-failed" });
-      logOnce("linear-auth-warning", `[SUDA][Linear] ${LINEAR_AUTH_WARNING}`);
-    }
+    this.logAuthWarnings();
 
     const events = createBriefingEvents({
       linearChanges,
-      integrationWarnings: warnings,
+      githubActivities,
     });
 
     this.presentEvents(events);
     this.emitStatus();
   }
 
-  private async runGitHubPollCycle(): Promise<void> {
-    if (this.github.disabled || this.github.authFailed) return;
-
-    const githubActivities = await this.pollGitHub();
-    const warnings: Array<{ message: string; key: string }> = [];
+  private logAuthWarnings(): void {
+    if (this.linear.authFailed && !this.announcedWarnings.has("linear-auth-failed")) {
+      this.announcedWarnings.add("linear-auth-failed");
+      this.linear.message = LINEAR_AUTH_WARNING;
+      logOnce("linear-auth-warning", `[SUDA][Linear] ${LINEAR_AUTH_WARNING}`);
+    }
 
     if (this.github.authFailed && !this.announcedWarnings.has("github-auth-failed")) {
       this.announcedWarnings.add("github-auth-failed");
-      warnings.push({ message: GITHUB_AUTH_WARNING, key: "github-auth-failed" });
+      this.github.message = GITHUB_AUTH_WARNING;
       logOnce("github-auth-warning", `[SUDA][GitHub] ${GITHUB_AUTH_WARNING}`);
     }
-
-    const events = createBriefingEvents({
-      githubActivities,
-      integrationWarnings: warnings,
-    });
-
-    this.presentEvents(events);
-    this.emitStatus();
   }
 
   private presentEvents(events: BriefingEvent[]): void {
@@ -272,7 +280,9 @@ class IntegrationMonitorService {
       appendActivityHistory(briefing.overflowMessages);
     }
 
-    this.onTransmission(createCombinedBriefingPayload(briefing));
+    this.onTransmission(
+      createCombinedBriefingPayload(briefing, { voiceEnabled: true }),
+    );
   }
 
   private async pollLinear(): Promise<TaskChange[]> {
@@ -283,6 +293,11 @@ class IntegrationMonitorService {
     try {
       const result = await fetchLinearPoll();
       this.applyLinearResult(result.status, result.error?.message);
+
+      if (result.status === "disabled") {
+        this.linear.disabled = true;
+        return [];
+      }
 
       if (result.status === "connected" && result.data) {
         setCachedBriefing(result.data);
@@ -312,18 +327,20 @@ class IntegrationMonitorService {
     message?: string,
   ): void {
     this.linear.status = status;
-    this.linear.message = message;
+    if (message) {
+      this.linear.message = message;
+    }
 
     if (status === "connected") {
       this.linear.lastSuccessfulPollAt = new Date().toISOString();
       this.linear.failureCount = 0;
       this.linear.authFailed = false;
+      this.linear.disabled = false;
       return;
     }
 
     if (status === "authentication_failed") {
       this.linear.authFailed = true;
-      this.clearTimer("linear");
       logOnce(
         "linear-auth-failed",
         `[SUDA][Linear] Authentication failed: ${message ?? "unknown"}. Polling paused.`,
@@ -333,7 +350,6 @@ class IntegrationMonitorService {
 
     if (status === "disabled") {
       this.linear.disabled = true;
-      this.clearTimer("linear");
       return;
     }
 
@@ -355,7 +371,7 @@ class IntegrationMonitorService {
         this.githubState = result.data.updatedState;
         saveGitHubMonitorState(this.githubState);
         this.github.lastSuccessfulPollAt =
-          result.data.updatedState.lastSuccessfulPollAt;
+          result.data.updatedState.lastSuccessfulPollAt ?? null;
         return result.data.activities;
       }
       return [];
@@ -378,7 +394,9 @@ class IntegrationMonitorService {
     message?: string,
   ): void {
     this.github.status = status;
-    this.github.message = message;
+    if (message) {
+      this.github.message = message;
+    }
 
     if (status === "connected") {
       this.github.failureCount = 0;
@@ -388,7 +406,6 @@ class IntegrationMonitorService {
 
     if (status === "authentication_failed") {
       this.github.authFailed = true;
-      this.clearTimer("github");
       logOnce(
         "github-auth-failed",
         `[SUDA][GitHub] Authentication failed: ${message ?? "unknown"}. Polling paused.`,
@@ -398,7 +415,6 @@ class IntegrationMonitorService {
 
     if (status === "disabled") {
       this.github.disabled = true;
-      this.clearTimer("github");
       return;
     }
 
@@ -417,6 +433,10 @@ class IntegrationMonitorService {
 
   __getGitHubRuntime() {
     return this.github;
+  }
+
+  __getUnifiedTimerId() {
+    return this.unifiedTimerId;
   }
 
   __resetForTests(): void {
@@ -439,4 +459,8 @@ export function getBackoffDelayMs(failureCount: number, intervalMs: number): num
 
 export function __isMonitorStarted(): boolean {
   return (integrationMonitor as unknown as { started: boolean }).started;
+}
+
+export function __reloadTaskCacheFromStorage(): void {
+  integrationMonitor.syncTaskCache(loadTaskCache());
 }

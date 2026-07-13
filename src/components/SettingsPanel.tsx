@@ -160,6 +160,11 @@ export default function SettingsPanel({
           onChange={(v) => onUpdate("muteVoice", v)}
         />
         <Toggle
+          label="Browser voice fallback"
+          checked={settings.fallbackVoice}
+          onChange={(v) => onUpdate("fallbackVoice", v)}
+        />
+        <Toggle
           label="Hide text"
           checked={settings.disableText}
           onChange={(v) => onUpdate("disableText", v)}

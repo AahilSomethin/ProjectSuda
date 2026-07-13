@@ -115,9 +115,7 @@ function logElevenLabsFailure(reason: string, dedupe = false): void {
   if (dedupe && configMissingWarningShown) return;
   if (dedupe) configMissingWarningShown = true;
 
-  console.warn(
-    `[SUDA] ElevenLabs failed, using browser speechSynthesis fallback. Reason: ${reason}`,
-  );
+  console.warn(`[SUDA] ElevenLabs failed. Reason: ${reason}`);
 }
 
 function logVoiceProvider(provider: "elevenlabs" | "browser"): void {
@@ -356,6 +354,7 @@ async function speakWithElevenLabs(
   text: string,
   callbacks?: VoiceCallbacks,
   generation?: number,
+  allowBrowserFallback = false,
 ): Promise<boolean> {
   if (generation !== undefined && generation !== speakGeneration) {
     return true;
@@ -429,7 +428,11 @@ async function speakWithElevenLabs(
     activeCancel = null;
 
     logElevenLabsFailure("Audio playback failed: audio element error");
-    speakWithBrowser(text, callbacks, generation);
+    if (allowBrowserFallback) {
+      speakWithBrowser(text, callbacks, generation);
+    } else {
+      callbacks?.onEnd?.();
+    }
   });
 
   activeCancel = () => {
@@ -461,7 +464,11 @@ async function speakWithElevenLabs(
       ? " — click SUDA once to allow audio"
       : "";
     logElevenLabsFailure(`Audio playback failed: ${reason}${hint}`);
-    speakWithBrowser(text, callbacks, generation);
+    if (allowBrowserFallback) {
+      speakWithBrowser(text, callbacks, generation);
+    } else {
+      callbacks?.onEnd?.();
+    }
     return true;
   }
 
@@ -479,7 +486,15 @@ async function speakWithElevenLabs(
   return true;
 }
 
-export function speakText(text: string, callbacks?: VoiceCallbacks): void {
+export interface SpeakOptions {
+  fallbackVoice?: boolean;
+}
+
+export function speakText(
+  text: string,
+  callbacks?: VoiceCallbacks,
+  options?: SpeakOptions,
+): void {
   if (voiceMuted || !text.trim()) {
     callbacks?.onEnd?.();
     return;
@@ -489,12 +504,20 @@ export function speakText(text: string, callbacks?: VoiceCallbacks): void {
 
   cancelSpeech();
   const generation = speakGeneration;
+  const allowBrowserFallback = options?.fallbackVoice ?? false;
 
   void (async () => {
-    const usedElevenLabs = await speakWithElevenLabs(text, callbacks, generation);
+    const usedElevenLabs = await speakWithElevenLabs(
+      text,
+      callbacks,
+      generation,
+      allowBrowserFallback,
+    );
     if (generation !== speakGeneration) return;
-    if (!usedElevenLabs) {
+    if (!usedElevenLabs && allowBrowserFallback) {
       speakWithBrowser(text, callbacks, generation);
+    } else if (!usedElevenLabs) {
+      callbacks?.onEnd?.();
     }
   })();
 }

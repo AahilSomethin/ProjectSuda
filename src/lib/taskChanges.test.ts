@@ -65,6 +65,13 @@ describe("taskChanges", () => {
     expect(second.changes).toHaveLength(0);
   });
 
+  it("ignores updatedAt-only changes without fingerprint updates", () => {
+    const baseline = establishBaseline(EMPTY_TASK_CACHE, [task()]);
+    const bumped = task({ updatedAt: "2026-07-08T11:00:00Z" });
+    const { changes } = detectTaskChanges(baseline, [bumped]);
+    expect(changes).toHaveLength(0);
+  });
+
   it("builds stable fingerprints", () => {
     const fp1 = buildTaskFingerprint(task({ description: "abc" }));
     const fp2 = buildTaskFingerprint(task({ description: "abc" }));

@@ -88,7 +88,7 @@ pub async fn poll_repository(
         let pulls = client.get_json(&pulls_url).await?;
         if let Some(items) = pulls.as_array() {
             for pull in items {
-                if let Some(activity) = activity_from_pull(repo, pull) {
+                if let Some(activity) = activity_from_pull(repo, pull, &state.pr_snapshots) {
                     activities.push(activity);
                 }
             }
@@ -192,6 +192,17 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
                     url,
                     merge_commit_sha,
                 })
+            } else if matches!(action, "opened" | "reopened" | "synchronize" | "edited") {
+                Some(GitHubActivity::PullRequestUpdated {
+                    id: unique_id,
+                    repository: repo.to_string(),
+                    pull_request_number: number,
+                    title,
+                    actor,
+                    action: action.to_string(),
+                    occurred_at,
+                    url,
+                })
             } else {
                 None
             }
@@ -216,7 +227,11 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
     }
 }
 
-fn activity_from_pull(repo: &str, pull: &serde_json::Value) -> Option<GitHubActivity> {
+fn activity_from_pull(
+    repo: &str,
+    pull: &serde_json::Value,
+    pr_snapshots: &std::collections::HashMap<String, String>,
+) -> Option<GitHubActivity> {
     let number = pull.get("number").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let title = pull
         .get("title")
@@ -269,6 +284,11 @@ fn activity_from_pull(repo: &str, pull: &serde_json::Value) -> Option<GitHubActi
     }
 
     if state == "open" {
+        let snapshot_key = pr_snapshot_key(repo, number);
+        if pr_snapshots.get(&snapshot_key) == Some(&updated_at) {
+            return None;
+        }
+
         return Some(GitHubActivity::PullRequestUpdated {
             id: format!("{repo}:pr:{number}:updated:{updated_at}"),
             repository: repo.to_string(),
@@ -298,14 +318,13 @@ pub fn filter_and_update_state(
     activities = dedupe_merge_and_push(activities);
 
     let mut processed = state.processed_event_ids.clone();
+    let mut pr_snapshots = state.pr_snapshots.clone();
     let mut notify = Vec::new();
 
     if !state.baseline_established {
         for activity in &activities {
             processed.push(activity.id().to_string());
-        }
-        for key in branch_heads.keys() {
-            let _ = key;
+            update_pr_snapshot(&mut pr_snapshots, activity);
         }
         processed = trim_processed_ids(processed);
         return (
@@ -313,6 +332,7 @@ pub fn filter_and_update_state(
             GitHubMonitorState {
                 processed_event_ids: processed,
                 branch_heads,
+                pr_snapshots,
                 last_successful_poll_at: Some(chrono::Utc::now().to_rfc3339()),
                 baseline_established: true,
             },
@@ -324,7 +344,13 @@ pub fn filter_and_update_state(
         if processed.contains(&id) {
             continue;
         }
+        if is_stale_pr_activity(&pr_snapshots, &activity) {
+            processed.push(id);
+            update_pr_snapshot(&mut pr_snapshots, &activity);
+            continue;
+        }
         processed.push(id);
+        update_pr_snapshot(&mut pr_snapshots, &activity);
         notify.push(activity);
     }
 
@@ -335,10 +361,58 @@ pub fn filter_and_update_state(
         GitHubMonitorState {
             processed_event_ids: processed,
             branch_heads,
+            pr_snapshots,
             last_successful_poll_at: Some(chrono::Utc::now().to_rfc3339()),
             baseline_established: true,
         },
     )
+}
+
+fn pr_snapshot_key(repository: &str, pull_request_number: u32) -> String {
+    format!("{repository}:pr:{pull_request_number}")
+}
+
+fn update_pr_snapshot(
+    snapshots: &mut std::collections::HashMap<String, String>,
+    activity: &GitHubActivity,
+) {
+    match activity {
+        GitHubActivity::PullRequestUpdated {
+            repository,
+            pull_request_number,
+            occurred_at,
+            ..
+        }
+        | GitHubActivity::PullRequestMerged {
+            repository,
+            pull_request_number,
+            occurred_at,
+            ..
+        } => {
+            snapshots.insert(
+                pr_snapshot_key(repository, *pull_request_number),
+                occurred_at.clone(),
+            );
+        }
+        _ => {}
+    }
+}
+
+fn is_stale_pr_activity(
+    snapshots: &std::collections::HashMap<String, String>,
+    activity: &GitHubActivity,
+) -> bool {
+    match activity {
+        GitHubActivity::PullRequestUpdated {
+            repository,
+            pull_request_number,
+            occurred_at,
+            action,
+            ..
+        } if action == "updated" => snapshots.get(&pr_snapshot_key(repository, *pull_request_number))
+            == Some(occurred_at),
+        _ => false,
+    }
 }
 
 fn dedupe_merge_and_push(activities: Vec<GitHubActivity>) -> Vec<GitHubActivity> {
@@ -446,6 +520,7 @@ mod tests {
         let state = GitHubMonitorState {
             processed_event_ids: vec![],
             branch_heads: std::collections::HashMap::new(),
+            pr_snapshots: std::collections::HashMap::new(),
             last_successful_poll_at: None,
             baseline_established: false,
         };
@@ -464,5 +539,33 @@ mod tests {
         assert!(notify.is_empty());
         assert!(next.baseline_established);
         assert!(next.processed_event_ids.contains(&"suda:1".to_string()));
+    }
+
+    #[test]
+    fn pull_request_opened_from_event() {
+        let event = serde_json::json!({
+            "id": 99,
+            "type": "PullRequestEvent",
+            "actor": { "login": "Aahil" },
+            "created_at": "2026-07-13T10:00:00Z",
+            "payload": {
+                "action": "opened",
+                "pull_request": {
+                    "number": 42,
+                    "title": "Add feature",
+                    "html_url": "https://github.com/org/MINDCrew/pull/42"
+                }
+            }
+        });
+
+        let activity = activity_from_event("MINDCrew", &event);
+        assert!(matches!(
+            activity,
+            Some(GitHubActivity::PullRequestUpdated {
+                pull_request_number: 42,
+                action,
+                ..
+            }) if action == "opened"
+        ));
     }
 }

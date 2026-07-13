@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatDueLabelInMaldivesTime } from "../lib/timezone";
+import {
+  isOverdueInMaldives,
+  isTodayInMaldives,
+  isTomorrowInMaldives,
+} from "../lib/timezone";
 import type {
   IntegrationResult,
   LinearBriefingResponse,
@@ -215,6 +220,61 @@ function formatTaskShortLine(change: TaskChange): string {
         ? ` (${changes.join(", ")})`
         : "";
   return `${task.id} ${task.title} — ${statusDue}${changeNote}`;
+}
+
+export function formatTaskChangeBullet(change: TaskChange): string {
+  const { task, kind, changes } = change;
+
+  if (kind === "new") {
+    return `${task.id} was assigned to you: ${task.title}`;
+  }
+
+  if (kind === "dueSoon") {
+    if (task.dueDate && isOverdueInMaldives(task.dueDate)) {
+      return `${task.id} is overdue`;
+    }
+    if (task.dueDate && isTodayInMaldives(task.dueDate)) {
+      return `${task.id} is due today`;
+    }
+    if (task.dueDate && isTomorrowInMaldives(task.dueDate)) {
+      return `${task.id} is due tomorrow`;
+    }
+    return `${task.id} is due soon`;
+  }
+
+  if (changes.includes("status updated")) {
+    return `${task.id} moved to ${task.status}`;
+  }
+
+  if (changes.includes("assignee updated")) {
+    return `${task.id} was reassigned`;
+  }
+
+  if (changes.includes("priority updated")) {
+    return `${task.id} priority changed to ${task.priority ?? "None"}`;
+  }
+
+  if (changes.includes("due date updated")) {
+    const due = formatDueLabelInMaldivesTime(task.dueDate);
+    return due
+      ? `${task.id} due date changed to ${due}`
+      : `${task.id} due date was updated`;
+  }
+
+  if (changes.includes("title updated")) {
+    return `${task.id} title updated: ${task.title}`;
+  }
+
+  if (changes.includes("description updated")) {
+    return `${task.id} description was updated`;
+  }
+
+  return `${task.id} was updated`;
+}
+
+export function formatTaskChangeVoiceLine(change: TaskChange): string {
+  const bullet = formatTaskChangeBullet(change);
+  return bullet.endsWith(".") ? bullet : `${bullet}.`;
 }
 
 export function formatTaskChangesUpdate(changes: TaskChange[]): string {

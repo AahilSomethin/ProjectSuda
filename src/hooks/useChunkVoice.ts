@@ -4,6 +4,7 @@ import { cancelSpeech, speakText } from "../services/voice";
 export function useChunkVoice(
   text: string,
   enabled: boolean,
+  fallbackVoice: boolean,
 ): {
   isSpeaking: boolean;
   voiceDone: boolean;
@@ -22,20 +23,24 @@ export function useChunkVoice(
     setIsSpeaking(false);
     setVoiceDone(false);
 
-    speakText(text, {
-      onStart: () => setIsSpeaking(true),
-      onEnd: () => {
-        setIsSpeaking(false);
-        setVoiceDone(true);
+    speakText(
+      text,
+      {
+        onStart: () => setIsSpeaking(true),
+        onEnd: () => {
+          setIsSpeaking(false);
+          setVoiceDone(true);
+        },
       },
-    });
+      { fallbackVoice },
+    );
 
     return () => {
       cancelSpeech();
       setIsSpeaking(false);
       setVoiceDone(true);
     };
-  }, [text, enabled]);
+  }, [text, enabled, fallbackVoice]);
 
   return { isSpeaking, voiceDone };
 }

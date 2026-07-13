@@ -35,6 +35,7 @@ interface TransmissionPopupProps {
   transmission: ActiveTransmission;
   disableText: boolean;
   muteVoice: boolean;
+  fallbackVoice: boolean;
   onTransmissionActivityChange?: (activity: TransmissionActivity) => void;
   autoHideMs?: number;
   onAutoHide?: () => void;
@@ -65,6 +66,7 @@ function MessagePhase({
   isStatus,
   voiceEnabled,
   muteVoice,
+  fallbackVoice,
   onTransmissionActivityChange,
   onMessageCompleteChange,
 }: {
@@ -74,6 +76,7 @@ function MessagePhase({
   isStatus: boolean;
   voiceEnabled: boolean;
   muteVoice: boolean;
+  fallbackVoice: boolean;
   onTransmissionActivityChange?: (activity: TransmissionActivity) => void;
   onMessageCompleteChange?: (complete: boolean) => void;
 }) {
@@ -112,6 +115,7 @@ function MessagePhase({
   const { isSpeaking, voiceDone } = useChunkVoice(
     voiceChunkForPage,
     shouldPlayVoice,
+    fallbackVoice,
   );
 
   useEffect(() => {
@@ -166,6 +170,7 @@ export default function TransmissionPopup({
   transmission,
   disableText,
   muteVoice,
+  fallbackVoice,
   onTransmissionActivityChange,
   autoHideMs,
   onAutoHide,
@@ -262,6 +267,7 @@ export default function TransmissionPopup({
             isStatus={isStatus}
             voiceEnabled={voiceEnabled ?? false}
             muteVoice={muteVoice}
+            fallbackVoice={fallbackVoice}
             onTransmissionActivityChange={onTransmissionActivityChange}
             onMessageCompleteChange={handleMessageCompleteChange}
           />

@@ -5,27 +5,29 @@ import {
   githubActivityPriority,
   sortGitHubActivities,
 } from "./githubChanges";
-import { formatTaskChangesUpdate, formatTaskChangesVoiceText } from "../services/briefing";
+import {
+  formatTaskChangeBullet,
+  formatTaskChangeVoiceLine,
+} from "../services/briefing";
 
 export const MAX_BRIEFING_EVENTS = 5;
 
 export type BriefingEvent =
   | { kind: "github"; activity: GitHubActivity; priority: number }
-  | { kind: "linear"; changes: TaskChange[]; priority: number }
-  | { kind: "integration_warning"; message: string; priority: number; key: string };
+  | { kind: "linear"; change: TaskChange; priority: number };
 
 const PRIORITY = {
   prMerged: 1,
   githubPush: 2,
   calendar: 3,
   linear: 4,
-  integrationWarning: 5,
+  branchCreated: 5,
+  prUpdated: 6,
 } as const;
 
 export function createBriefingEvents(input: {
   githubActivities?: GitHubActivity[];
   linearChanges?: TaskChange[];
-  integrationWarnings?: Array<{ message: string; key: string }>;
 }): BriefingEvent[] {
   const events: BriefingEvent[] = [];
 
@@ -37,20 +39,11 @@ export function createBriefingEvents(input: {
     });
   }
 
-  if (input.linearChanges && input.linearChanges.length > 0) {
+  for (const change of input.linearChanges ?? []) {
     events.push({
       kind: "linear",
-      changes: input.linearChanges,
+      change,
       priority: PRIORITY.linear,
-    });
-  }
-
-  for (const warning of input.integrationWarnings ?? []) {
-    events.push({
-      kind: "integration_warning",
-      message: warning.message,
-      key: warning.key,
-      priority: PRIORITY.integrationWarning,
     });
   }
 
@@ -64,63 +57,35 @@ export interface CombinedBriefing {
   overflowMessages: string[];
 }
 
+function eventBullet(event: BriefingEvent): string {
+  if (event.kind === "linear") {
+    return formatTaskChangeBullet(event.change);
+  }
+  return formatGitHubActivityMessage(event.activity);
+}
+
+function eventVoiceLine(event: BriefingEvent): string {
+  if (event.kind === "linear") {
+    return formatTaskChangeVoiceLine(event.change);
+  }
+  return formatGitHubActivityMessage(event.activity);
+}
+
 export function buildCombinedBriefing(events: BriefingEvent[]): CombinedBriefing | null {
   if (events.length === 0) return null;
 
-  const bulletLines: string[] = [];
-  const overflow: string[] = [];
-
-  for (const event of events) {
-    if (event.kind === "linear") {
-      const text = formatTaskChangesUpdate(event.changes);
-      const lines = text.split("\n").slice(1);
-      bulletLines.push(...lines.map((line) => line.replace(/^•\s*/, "• ")));
-      continue;
-    }
-
-    if (event.kind === "integration_warning") {
-      bulletLines.push(`• ${event.message}`);
-      continue;
-    }
-
-    bulletLines.push(`• ${formatGitHubActivityMessage(event.activity)}`);
-  }
-
+  const bulletLines = events.map((event) => `• ${eventBullet(event)}`);
   const displayed = bulletLines.slice(0, MAX_BRIEFING_EVENTS);
-  overflow.push(...bulletLines.slice(MAX_BRIEFING_EVENTS));
+  const overflow = bulletLines.slice(MAX_BRIEFING_EVENTS);
 
-  const githubRepos = [
-    ...new Set(
-      events
-        .filter((e): e is Extract<BriefingEvent, { kind: "github" }> => e.kind === "github")
-        .map((e) => e.activity.repository),
-    ),
-  ];
+  const message = ["SUDA update:", ...displayed].join("\n");
 
-  const header =
-    githubRepos.length === 1
-      ? `GitHub update for ${githubRepos[0]}:`
-      : githubRepos.length > 1
-        ? "GitHub updates:"
-        : events.some((e) => e.kind === "linear")
-          ? "Updates:"
-          : "Transmission:";
-
-  const message = [header, ...displayed].join("\n");
-
-  const voiceParts: string[] = [];
-  for (const event of events.slice(0, MAX_BRIEFING_EVENTS)) {
-    if (event.kind === "github") {
-      voiceParts.push(formatGitHubActivityMessage(event.activity));
-    } else if (event.kind === "linear") {
-      voiceParts.push(formatTaskChangesVoiceText(event.changes));
-    } else if (event.kind === "integration_warning") {
-      voiceParts.push(event.message);
-    }
-  }
+  const voiceParts = events
+    .slice(0, MAX_BRIEFING_EVENTS)
+    .map((event) => eventVoiceLine(event));
 
   return {
-    title: "New Transmission",
+    title: "SUDA",
     message,
     voiceMessage: voiceParts.join(" "),
     overflowMessages: overflow,

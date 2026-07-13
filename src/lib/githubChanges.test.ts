@@ -23,6 +23,39 @@ describe("githubChanges", () => {
     expect(message).not.toContain("was rebased");
   });
 
+  it("formats push activity without actor prefix", () => {
+    const activity: GitHubActivity = {
+      id: "1",
+      type: "push",
+      repository: "MINDCrew",
+      branch: "main",
+      actor: "Aahil",
+      commitCount: 2,
+      commitMessages: [],
+      forced: false,
+      occurredAt: "2026-07-13T10:00:00Z",
+    };
+    expect(formatGitHubActivityMessage(activity)).toBe(
+      "2 commits were pushed to MINDCrew.",
+    );
+  });
+
+  it("formats opened pull requests", () => {
+    const activity: GitHubActivity = {
+      id: "2",
+      type: "pull_request_updated",
+      repository: "MINDCrew",
+      pullRequestNumber: 42,
+      title: "Feature",
+      actor: "Aahil",
+      action: "opened",
+      occurredAt: "2026-07-13T10:00:00Z",
+    };
+    expect(formatGitHubActivityMessage(activity)).toBe(
+      "Pull request #42 was opened.",
+    );
+  });
+
   it("sorts merged PRs before pushes", () => {
     const push: GitHubActivity = {
       id: "1",

@@ -7,14 +7,14 @@ import {
   MAX_BRIEFING_EVENTS,
 } from "./briefingCoordinator";
 
-function taskChange(id: string): TaskChange {
+function taskChange(id: string, status = "In Progress"): TaskChange {
   return {
     kind: "updated",
     task: {
       id,
       linearId: id,
       title: "Task",
-      status: "In Progress",
+      status,
       updatedAt: "2026-07-13T10:00:00Z",
     },
     changes: ["status updated"],
@@ -50,6 +50,7 @@ describe("briefingCoordinator", () => {
       githubActivities: [push, merge],
     });
     const briefing = buildCombinedBriefing(events);
+    expect(briefing?.message).toContain("SUDA update:");
     expect(briefing?.message).toContain("Pull request #42 was merged into main.");
     expect(briefing?.message.indexOf("Pull request")).toBeLessThan(
       briefing?.message.indexOf("pushed") ?? 0,
@@ -73,26 +74,38 @@ describe("briefingCoordinator", () => {
     expect(briefing?.overflowMessages.length).toBe(2);
   });
 
-  it("includes linear changes after github events", () => {
+  it("combines github and linear into one SUDA update", () => {
     const events = createBriefingEvents({
       githubActivities: [
         {
           id: "p1",
           type: "push",
-          repository: "suda",
+          repository: "MINDCrew",
           branch: "main",
           actor: "Aahil",
-          commitCount: 1,
+          commitCount: 2,
           commitMessages: [],
           forced: false,
           occurredAt: "2026-07-13T10:00:00Z",
         },
+        {
+          id: "pr1",
+          type: "pull_request_updated",
+          repository: "MINDCrew",
+          pullRequestNumber: 42,
+          title: "Feature",
+          actor: "Aahil",
+          action: "opened",
+          occurredAt: "2026-07-13T10:00:00Z",
+        },
       ],
-      linearChanges: [taskChange("ENG-1")],
+      linearChanges: [taskChange("MIND-42", "Done")],
     });
 
     const briefing = buildCombinedBriefing(events);
-    expect(briefing?.message).toContain("pushed");
-    expect(briefing?.message).toContain("ENG-1");
+    expect(briefing?.message).toContain("SUDA update:");
+    expect(briefing?.message).toContain("2 commits were pushed to MINDCrew.");
+    expect(briefing?.message).toContain("Pull request #42 was opened.");
+    expect(briefing?.message).toContain("MIND-42 moved to Done");
   });
 });
