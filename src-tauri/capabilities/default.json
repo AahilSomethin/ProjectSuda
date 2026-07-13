@@ -6,6 +6,8 @@
   "permissions": [
     "core:default",
     "briefing",
+    "github",
+    "integrations",
     "elevenlabs-tts",
     "opener:default",
     "core:window:allow-close",

@@ -1,5 +1,7 @@
 mod briefing;
 mod elevenlabs;
+mod github;
+mod integrations;
 
 fn load_env() {
     // 1. cwd .env (typical: `npm run tauri dev` from project root)
@@ -22,7 +24,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             briefing::linear_briefing,
+            briefing::linear_poll,
             briefing::linear_briefing_configured,
+            github::github_poll,
+            github::github_status,
+            integrations::env::reload_integration_env_command,
             elevenlabs::elevenlabs_tts,
             elevenlabs::elevenlabs_configured,
         ])

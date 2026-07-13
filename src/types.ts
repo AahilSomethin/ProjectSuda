@@ -1,4 +1,97 @@
-export type TransmissionType = "task" | "meeting" | "update" | "info" | "briefing";
+export type IntegrationStatus =
+  | "disabled"
+  | "connecting"
+  | "connected"
+  | "temporarily_unavailable"
+  | "authentication_failed";
+
+export interface IntegrationError {
+  httpStatus: number;
+  message: string;
+}
+
+export interface IntegrationResult<T> {
+  status: IntegrationStatus;
+  data?: T | null;
+  error?: IntegrationError | null;
+}
+
+export type GitHubActivity =
+  | {
+      id: string;
+      type: "push";
+      repository: string;
+      branch: string;
+      actor: string;
+      commitCount: number;
+      commitMessages: string[];
+      forced: boolean;
+      occurredAt: string;
+      url?: string;
+    }
+  | {
+      id: string;
+      type: "pull_request_merged";
+      repository: string;
+      pullRequestNumber: number;
+      title: string;
+      actor: string;
+      baseBranch: string;
+      headBranch: string;
+      occurredAt: string;
+      url?: string;
+      mergeCommitSha?: string;
+    }
+  | {
+      id: string;
+      type: "branch_created";
+      repository: string;
+      branch: string;
+      actor: string;
+      occurredAt: string;
+      url?: string;
+    }
+  | {
+      id: string;
+      type: "pull_request_updated";
+      repository: string;
+      pullRequestNumber: number;
+      title: string;
+      actor: string;
+      action: string;
+      occurredAt: string;
+      url?: string;
+    };
+
+export interface GitHubMonitorState {
+  processedEventIds: string[];
+  branchHeads: Record<string, string>;
+  lastSuccessfulPollAt: string | null;
+  baselineEstablished?: boolean;
+}
+
+export interface GitHubPollResponse {
+  activities: GitHubActivity[];
+  updatedState: GitHubMonitorState;
+  pollIntervalSeconds: number;
+}
+
+export interface GitHubStatus {
+  configured: boolean;
+  owner?: string | null;
+  repositories: string[];
+  pollIntervalSeconds: number;
+  notifyPullRequests: boolean;
+}
+
+export interface IntegrationViewStatus {
+  name: "linear" | "github";
+  status: IntegrationStatus;
+  lastSuccessfulPollAt: string | null;
+  message?: string;
+}
+
+export type TransmissionType = "task" | "meeting" | "update" | "info" | "briefing" | "github";
 
 export type TransmissionPhase = "idle" | "intro" | "message";
 

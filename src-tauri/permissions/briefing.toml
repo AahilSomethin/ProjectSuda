@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "briefing"
 description = "Allows Linear briefing commands"
-commands.allow = ["linear_briefing", "linear_briefing_configured"]
+commands.allow = ["linear_briefing", "linear_poll", "linear_briefing_configured"]

@@ -1,22 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  detectTaskChanges,
-  getInitialTaskCache,
   markBaselineFromTasks,
-  persistTaskCache,
 } from "../lib/taskChanges";
 import type { TaskCacheState } from "../lib/taskCache";
-import type { TaskChange } from "../lib/taskChanges";
+import { getInitialTaskCache } from "../lib/taskChanges";
 import { devLog } from "../lib/devLog";
 import {
   BriefingError,
   evaluateStartupImportance,
-  fetchLinearBriefing,
+  fetchLinearPoll,
   getCachedBriefing,
 } from "../services/briefing";
-import { fetchIncompleteLinearTasks } from "../services/linear";
 import { SUDA_MESSAGES } from "../lib/transmissions";
-import type { LinearBriefingResponse, LinearTask } from "../types";
+import type { LinearBriefingResponse } from "../types";
 
 export interface BriefingLoadResult {
   briefing: LinearBriefingResponse | null;
@@ -37,13 +33,27 @@ export function useSudaBriefing() {
     setBriefingError(null);
 
     try {
-      const result = await fetchLinearBriefing();
+      const result = await fetchLinearPoll();
       if (requestId !== briefingRequestRef.current) {
-        return { briefing: result, error: null };
+        return { briefing: result.data ?? null, error: null };
       }
 
-      setBriefing(result);
-      return { briefing: result, error: null };
+      if (result.status === "connected" && result.data) {
+        setBriefing(result.data);
+        return { briefing: result.data, error: null };
+      }
+
+      const message =
+        result.error?.message ??
+        (result.status === "disabled"
+          ? "LINEAR_API_KEY is not set"
+          : SUDA_MESSAGES.briefingError);
+
+      if (requestId === briefingRequestRef.current) {
+        setBriefingError(message);
+      }
+
+      return { briefing: null, error: message };
     } catch (error) {
       const message =
         error instanceof BriefingError
@@ -62,43 +72,9 @@ export function useSudaBriefing() {
     }
   }, []);
 
-  const establishBaseline = useCallback((tasks: LinearTask[]) => {
+  const establishBaseline = useCallback((tasks: import("../types").LinearTask[]) => {
     cacheRef.current = markBaselineFromTasks(cacheRef.current, tasks);
     devLog("[SUDA] task cache baseline established", tasks.length);
-  }, []);
-
-  const pollForChanges = useCallback(async (): Promise<TaskChange[]> => {
-    try {
-      devLog("[SUDA] polling Linear tasks");
-      const tasks = await fetchIncompleteLinearTasks(true);
-      const cached = getCachedBriefing();
-      if (cached) {
-        setBriefing(cached);
-      }
-
-      const { changes, nextCache } = detectTaskChanges(
-        cacheRef.current,
-        tasks,
-      );
-      cacheRef.current = nextCache;
-      persistTaskCache(nextCache);
-
-      if (changes.length === 0) {
-        devLog("[SUDA] no changes");
-        return [];
-      }
-
-      if (changes.some((change) => change.kind === "new")) {
-        devLog("[SUDA] new task detected");
-      } else {
-        devLog("[SUDA] task update detected");
-      }
-
-      return changes;
-    } catch {
-      devLog("[SUDA] poll failed");
-      return [];
-    }
   }, []);
 
   useEffect(() => {
@@ -115,7 +91,6 @@ export function useSudaBriefing() {
     briefingLoading,
     briefingError,
     loadBriefing,
-    pollForChanges,
     establishBaseline,
     evaluateStartupImportance,
     startupHandledRef,

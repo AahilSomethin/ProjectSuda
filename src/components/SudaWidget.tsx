@@ -12,12 +12,12 @@ import {
   createCheckingLinearPayload,
   createSummonedIdlePayload,
   createStartupBriefingPayload,
-  createTaskChangesPayload,
   getTransmissionAutoHideMs,
 } from "../lib/transmissions";
 import { setSettingsOverlay, setWindowMode } from "../lib/windowMode";
-import type { TransmissionPayload } from "../types";
+import type { IntegrationViewStatus, TransmissionPayload } from "../types";
 import { briefingToLinearTasks } from "../services/briefing";
+import { integrationMonitor } from "../services/integrationMonitor";
 import {
   primeBrowserSpeechForFallback,
   unlockAudioPlayback,
@@ -43,11 +43,14 @@ export default function SudaWidget() {
     briefing,
     briefingLoading,
     loadBriefing,
-    pollForChanges,
     establishBaseline,
     evaluateStartupImportance,
     startupHandledRef,
   } = useSudaBriefing();
+
+  const [integrationStatuses, setIntegrationStatuses] = useState<
+    IntegrationViewStatus[]
+  >(() => integrationMonitor.getIntegrationStatuses());
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isManuallySummoned, setIsManuallySummoned] = useState(false);
@@ -80,10 +83,23 @@ export default function SudaWidget() {
     (payload: TransmissionPayload) => {
       pendingSettingsOpenRef.current = false;
       setSettingsOpen(false);
-      showTransmission(payload);
+      showTransmission({
+        ...payload,
+        voiceEnabled: payload.voiceEnabled ?? !settings.muteVoice,
+      });
     },
-    [showTransmission],
+    [settings.muteVoice, showTransmission],
   );
+
+  useEffect(() => {
+    integrationMonitor.start(
+      (payload) => {
+        presentTransmission(payload);
+        devLog("[SUDA] transmission opened");
+      },
+      (statuses) => setIntegrationStatuses(statuses),
+    );
+  }, [presentTransmission]);
 
   const {
     panelReveal,
@@ -213,16 +229,13 @@ export default function SudaWidget() {
     }
   }, [establishBaseline, loadBriefing, presentTransmission, settings.muteVoice]);
 
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      const changes = await pollForChanges();
-      if (changes.length === 0) return;
-      presentTransmission(createTaskChangesPayload(changes));
-      devLog("[SUDA] transmission opened");
-    }, config.linearPollIntervalMs);
+  const handleRetryLinear = useCallback(() => {
+    void integrationMonitor.retryLinear();
+  }, []);
 
-    return () => clearInterval(interval);
-  }, [pollForChanges, presentTransmission]);
+  const handleCheckGitHub = useCallback(() => {
+    void integrationMonitor.checkGitHubNow();
+  }, []);
 
   const summonSuda = useCallback(() => {
     void unlockAudioPlayback();
@@ -295,6 +308,9 @@ export default function SudaWidget() {
         <div ref={settingsRef} className="suda-settings-wrap">
           <SettingsPanel
             settings={settings}
+            integrationStatuses={integrationStatuses}
+            onRetryLinear={handleRetryLinear}
+            onCheckGitHub={handleCheckGitHub}
             onUpdate={updateSetting}
             onClose={closeSettings}
           />

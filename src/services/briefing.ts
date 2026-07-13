@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { formatDueLabelInMaldivesTime } from "../lib/timezone";
-import type { LinearBriefingResponse, LinearTask } from "../types";
+import type {
+  IntegrationResult,
+  LinearBriefingResponse,
+  LinearTask,
+} from "../types";
 import type { TaskChange } from "../lib/taskChanges";
 
 let cachedBriefing: LinearBriefingResponse | null = null;
@@ -37,6 +41,22 @@ function extractInvokeErrorMessage(error: unknown): string {
 export function formatBriefingLoadError(backendMessage: string): string {
   const detail = backendMessage.trim() || "Unknown error";
   return `Failed to load Linear briefing: ${detail}`;
+}
+
+export async function fetchLinearPoll(): Promise<
+  IntegrationResult<LinearBriefingResponse>
+> {
+  if (!isTauriInvokeAvailable()) {
+    return {
+      status: "disabled",
+      error: {
+        httpStatus: 0,
+        message: "Linear briefing requires the SUDA desktop app.",
+      },
+    };
+  }
+
+  return invoke<IntegrationResult<LinearBriefingResponse>>("linear_poll");
 }
 
 export async function fetchLinearBriefing(): Promise<LinearBriefingResponse> {

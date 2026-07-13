@@ -164,6 +164,10 @@ export function getGreetingTitle(now: Date = new Date()): string {
   return `${label} Briefing`;
 }
 
+export function formatTimeInMaldives(date: Date): string {
+  return formatMaldivesTime(date);
+}
+
 export function formatDueLabelInMaldivesTime(
   dueDate?: string | null,
   now: Date = new Date(),

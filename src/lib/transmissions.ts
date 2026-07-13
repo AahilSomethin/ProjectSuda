@@ -17,6 +17,8 @@ export const SUDA_MESSAGES = {
   checkingLinear: "Checking Linear…",
   briefingError:
     "Failed to load Linear briefing: I couldn't reach Linear right now. Check your connection and LINEAR_API_KEY, then try again.",
+  linearAuthUnavailable:
+    "Linear authentication is unavailable. Linear monitoring has been paused, but GitHub monitoring remains active.",
 } as const;
 
 const AUTO_HIDE_MS = {
@@ -77,6 +79,21 @@ export function createSummonedIdlePayload(): TransmissionPayload {
     skipIntro: true,
     voiceEnabled: true,
     persistUntilDismissed: true,
+  };
+}
+
+export function createCombinedBriefingPayload(briefing: {
+  title: string;
+  message: string;
+  voiceMessage: string;
+}): TransmissionPayload {
+  return {
+    title: briefing.title,
+    message: briefing.message,
+    voiceMessage: briefing.voiceMessage,
+    type: "github",
+    skipIntro: true,
+    voiceEnabled: true,
   };
 }
 

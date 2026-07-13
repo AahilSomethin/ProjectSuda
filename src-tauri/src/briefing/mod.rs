@@ -4,6 +4,11 @@ use chrono::{Datelike, Duration, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
 
+use crate::integrations::{
+    logging::{log_integration, log_once},
+    IntegrationError, IntegrationResult, IntegrationStatus,
+};
+
 pub use linear::RawLinearTask;
 
 const DEFAULT_TIMEZONE: &str = "Indian/Maldives";
@@ -83,10 +88,6 @@ pub struct LinearBriefingResponse {
     pub raw_tasks: Vec<BriefingRawTask>,
 }
 
-fn log_briefing(message: impl AsRef<str>) {
-    #[cfg(debug_assertions)]
-    println!("[SUDA] {}", message.as_ref());
-}
 
 fn key_present(key: &str) -> bool {
     std::env::var(key)
@@ -94,10 +95,6 @@ fn key_present(key: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn log_key_presence() {
-    let linear_present = key_present("LINEAR_API_KEY");
-    log_briefing(format!("linear_api_key_present={linear_present}"));
-}
 
 fn briefing_timezone() -> String {
     std::env::var("SUDA_TIMEZONE").unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string())
@@ -289,34 +286,93 @@ pub fn build_deterministic_briefing(tasks: &[RawLinearTask]) -> BriefingContent 
     }
 }
 
-pub async fn generate_linear_briefing() -> Result<LinearBriefingResponse, String> {
-    log_briefing("linear_briefing started");
-    log_key_presence();
 
-    let linear_key = std::env::var("LINEAR_API_KEY")
-        .map_err(|_| "LINEAR_API_KEY is not set".to_string())?;
+fn linear_api_key() -> Option<String> {
+    std::env::var("LINEAR_API_KEY")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+}
 
-    if linear_key.trim().is_empty() {
-        return Err("LINEAR_API_KEY is empty".to_string());
+pub async fn poll_linear_briefing() -> IntegrationResult<LinearBriefingResponse> {
+    let Some(linear_key) = linear_api_key() else {
+        return IntegrationResult::disabled("LINEAR_API_KEY is not set");
+    };
+
+    match linear::fetch_my_issues(&linear_key).await {
+        Ok(tasks) => {
+            let stats = compute_stats(&tasks);
+            let content = build_deterministic_briefing(&tasks);
+            let response = LinearBriefingResponse {
+                source: "linear".to_string(),
+                generated_at: Utc::now().to_rfc3339(),
+                task_count: tasks.len(),
+                summary: content.summary,
+                focus_tasks: content.focus_tasks,
+                warnings: content.warnings,
+                first_action: content.first_action,
+                stats,
+                raw_tasks: map_raw_tasks(&tasks),
+            };
+            IntegrationResult::connected(response)
+        }
+        Err(error) => {
+            let status = if error.http_status == 401 || error.http_status == 403 {
+                IntegrationStatus::AuthenticationFailed
+            } else if error.http_status == 429 || error.http_status >= 500 || error.http_status == 0
+            {
+                IntegrationStatus::TemporarilyUnavailable
+            } else {
+                IntegrationStatus::TemporarilyUnavailable
+            };
+
+            if status == IntegrationStatus::AuthenticationFailed {
+                log_once(
+                    "linear-auth-failed",
+                    format!(
+                        "[Linear] Authentication failed: {}. Polling paused.",
+                        error.message
+                    ),
+                );
+            } else {
+                log_integration(
+                    "Linear",
+                    format!("Request failed ({}): {}", error.http_status, error.message),
+                );
+            }
+
+            IntegrationResult {
+                status,
+                data: None,
+                error: Some(IntegrationError {
+                    http_status: error.http_status,
+                    message: error.message,
+                }),
+            }
+        }
     }
+}
 
-    let tasks = linear::fetch_my_issues(&linear_key).await?;
-    log_briefing(format!("Linear fetch succeeded task_count={}", tasks.len()));
-
-    let stats = compute_stats(&tasks);
-    let content = build_deterministic_briefing(&tasks);
-
-    Ok(LinearBriefingResponse {
-        source: "linear".to_string(),
-        generated_at: Utc::now().to_rfc3339(),
-        task_count: tasks.len(),
-        summary: content.summary,
-        focus_tasks: content.focus_tasks,
-        warnings: content.warnings,
-        first_action: content.first_action,
-        stats,
-        raw_tasks: map_raw_tasks(&tasks),
-    })
+pub async fn generate_linear_briefing() -> Result<LinearBriefingResponse, String> {
+    let result = poll_linear_briefing().await;
+    match result.status {
+        IntegrationStatus::Connected => result
+            .data
+            .ok_or_else(|| "Linear briefing missing data".to_string()),
+        IntegrationStatus::Disabled => Err(result
+            .error
+            .map(|e| e.message)
+            .unwrap_or_else(|| "LINEAR_API_KEY is not set".to_string())),
+        _ => Err(result
+            .error
+            .map(|e| {
+                if e.http_status > 0 {
+                    format!("Linear API error ({}) {}", e.http_status, e.message)
+                } else {
+                    e.message
+                }
+            })
+            .unwrap_or_else(|| "Linear request failed".to_string())),
+    }
 }
 
 pub async fn build_diagnostics() -> LinearBriefingDiagnostics {
@@ -354,9 +410,18 @@ pub async fn build_diagnostics() -> LinearBriefingDiagnostics {
             linear_key_present,
             can_reach_linear_viewer: false,
             linear_viewer_name: None,
-            linear_error: Some(error),
+            linear_error: Some(if error.http_status > 0 {
+                format!("{} {}", error.http_status, error.message)
+            } else {
+                error.message
+            }),
         },
     }
+}
+
+#[tauri::command]
+pub async fn linear_poll() -> IntegrationResult<LinearBriefingResponse> {
+    poll_linear_briefing().await
 }
 
 #[tauri::command]

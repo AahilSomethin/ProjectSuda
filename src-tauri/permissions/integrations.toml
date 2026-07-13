@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "integrations"
+description = "Allows integration environment reload"
+commands.allow = ["reload_integration_env_command"]

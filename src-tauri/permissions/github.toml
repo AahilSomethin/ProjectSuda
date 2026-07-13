@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "github"
+description = "Allows GitHub monitoring commands"
+commands.allow = ["github_poll", "github_status"]

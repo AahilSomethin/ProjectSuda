@@ -1,6 +1,13 @@
+use crate::integrations::linear_auth::build_linear_auth_header;
 use serde::Deserialize;
 
 const LINEAR_GRAPHQL_URL: &str = "https://api.linear.app/graphql";
+
+#[derive(Debug, Clone)]
+pub struct LinearApiError {
+    pub http_status: u16,
+    pub message: String,
+}
 
 const VIEWER_QUERY: &str = r#"
 query {
@@ -134,10 +141,6 @@ pub struct RawLinearTask {
     pub assignee: Option<String>,
 }
 
-fn log_linear(message: impl AsRef<str>) {
-    #[cfg(debug_assertions)]
-    println!("[SUDA] {}", message.as_ref());
-}
 
 pub fn truncate_body(body: &str, max_len: usize) -> String {
     if body.len() <= max_len {
@@ -162,45 +165,49 @@ pub fn extract_graphql_error_messages(body: &str) -> Option<Vec<String>> {
     }
 }
 
-async fn execute_graphql(query: &str, api_key: &str) -> Result<String, String> {
-    log_linear("Linear request starting");
-
+async fn execute_graphql(query: &str, api_key: &str) -> Result<String, LinearApiError> {
     let client = reqwest::Client::new();
     let body = serde_json::json!({ "query": query });
+    let auth_header = build_linear_auth_header(api_key);
 
     let response = client
         .post(LINEAR_GRAPHQL_URL)
-        .header("Authorization", api_key.trim())
+        .header("Authorization", auth_header)
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
         .await
-        .map_err(|error| format!("Linear request failed: {error}"))?;
+        .map_err(|error| LinearApiError {
+            http_status: 0,
+            message: format!("Linear request failed: {error}"),
+        })?;
 
     let status = response.status();
-    let response_body = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read Linear response: {error}"))?;
-
-    log_linear(format!("Linear HTTP status={status}"));
+    let response_body = response.text().await.map_err(|error| LinearApiError {
+        http_status: status.as_u16(),
+        message: format!("Failed to read Linear response: {error}"),
+    })?;
 
     if !status.is_success() {
         let preview = truncate_body(&response_body, 300);
-        log_linear(format!("Linear error body preview={preview}"));
-        return Err(format!("Linear API error ({status}): {preview}"));
+        return Err(LinearApiError {
+            http_status: status.as_u16(),
+            message: format!("{status}: {preview}"),
+        });
     }
 
     if let Some(messages) = extract_graphql_error_messages(&response_body) {
         let joined = messages.join("; ");
-        log_linear(format!("Linear GraphQL errors: {joined}"));
-        return Err(format!("Linear GraphQL error: {joined}"));
+        return Err(LinearApiError {
+            http_status: 200,
+            message: format!("Linear GraphQL error: {joined}"),
+        });
     }
 
     Ok(response_body)
 }
 
-pub async fn fetch_viewer(api_key: &str) -> Result<LinearViewer, String> {
+pub async fn fetch_viewer(api_key: &str) -> Result<LinearViewer, LinearApiError> {
     let response_body = execute_graphql(VIEWER_QUERY, api_key).await?;
 
     #[derive(Deserialize)]
@@ -208,16 +215,20 @@ pub async fn fetch_viewer(api_key: &str) -> Result<LinearViewer, String> {
         data: Option<LinearViewerQueryData>,
     }
 
-    let parsed: ViewerEnvelope = serde_json::from_str(&response_body)
-        .map_err(|error| format!("Failed to parse Linear viewer response: {error}"))?;
+    let parsed: ViewerEnvelope = serde_json::from_str(&response_body).map_err(|error| {
+        LinearApiError {
+            http_status: 200,
+            message: format!("Failed to parse Linear viewer response: {error}"),
+        }
+    })?;
 
-    let viewer = parsed
+    parsed
         .data
         .map(|data| data.viewer)
-        .ok_or_else(|| "Linear returned no viewer data".to_string())?;
-
-    log_linear(format!("Linear viewer ok name={}", viewer.name));
-    Ok(viewer)
+        .ok_or_else(|| LinearApiError {
+            http_status: 200,
+            message: "Linear returned no viewer data".to_string(),
+        })
 }
 
 fn map_node(node: LinearIssueNode) -> RawLinearTask {
@@ -276,9 +287,7 @@ pub fn sort_tasks(tasks: &mut [RawLinearTask]) {
     });
 }
 
-pub async fn fetch_my_issues(api_key: &str) -> Result<Vec<RawLinearTask>, String> {
-    fetch_viewer(api_key).await?;
-
+pub async fn fetch_my_issues(api_key: &str) -> Result<Vec<RawLinearTask>, LinearApiError> {
     let response_body = execute_graphql(MY_ISSUES_QUERY, api_key).await?;
 
     #[derive(Deserialize)]
@@ -286,17 +295,21 @@ pub async fn fetch_my_issues(api_key: &str) -> Result<Vec<RawLinearTask>, String
         data: Option<LinearIssuesQueryData>,
     }
 
-    let parsed: IssuesEnvelope = serde_json::from_str(&response_body)
-        .map_err(|error| format!("Failed to parse Linear issues response: {error}"))?;
+    let parsed: IssuesEnvelope = serde_json::from_str(&response_body).map_err(|error| {
+        LinearApiError {
+            http_status: 200,
+            message: format!("Failed to parse Linear issues response: {error}"),
+        }
+    })?;
 
-    let data = parsed
-        .data
-        .ok_or_else(|| "Linear returned no issues data".to_string())?;
+    let data = parsed.data.ok_or_else(|| LinearApiError {
+        http_status: 200,
+        message: "Linear returned no issues data".to_string(),
+    })?;
 
     let mut tasks: Vec<RawLinearTask> = data.issues.nodes.into_iter().map(map_node).collect();
     sort_tasks(&mut tasks);
 
-    log_linear(format!("Linear issues fetched count={}", tasks.len()));
     Ok(tasks)
 }
 
