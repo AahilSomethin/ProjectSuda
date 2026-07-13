@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { cancelSpeech, speakText } from "../services/voice";
+import type { TransmissionKind } from "../types";
 
 export function useChunkVoice(
   text: string,
   enabled: boolean,
   fallbackVoice: boolean,
+  options?: {
+    dedupKey?: string;
+    kind?: TransmissionKind;
+    voiceEnabled?: boolean;
+  },
 ): {
   isSpeaking: boolean;
   voiceDone: boolean;
@@ -32,7 +38,12 @@ export function useChunkVoice(
           setVoiceDone(true);
         },
       },
-      { fallbackVoice },
+      {
+        fallbackVoice,
+        dedupKey: options?.dedupKey,
+        kind: options?.kind ?? "meaningful-activity",
+        voiceEnabled: options?.voiceEnabled ?? true,
+      },
     );
 
     return () => {
@@ -40,7 +51,14 @@ export function useChunkVoice(
       setIsSpeaking(false);
       setVoiceDone(true);
     };
-  }, [text, enabled, fallbackVoice]);
+  }, [
+    text,
+    enabled,
+    fallbackVoice,
+    options?.dedupKey,
+    options?.kind,
+    options?.voiceEnabled,
+  ]);
 
   return { isSpeaking, voiceDone };
 }

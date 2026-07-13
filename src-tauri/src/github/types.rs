@@ -1,8 +1,14 @@
 use serde::{Deserialize, Serialize};
 
+fn default_state_version() -> u32 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitHubMonitorState {
+    #[serde(default = "default_state_version")]
+    pub version: u32,
     pub processed_event_ids: Vec<String>,
     pub branch_heads: std::collections::HashMap<String, String>,
     #[serde(default)]

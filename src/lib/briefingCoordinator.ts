@@ -3,7 +3,6 @@ import type { TaskChange } from "./taskChanges";
 import {
   formatGitHubActivityMessage,
   githubActivityPriority,
-  sortGitHubActivities,
 } from "./githubChanges";
 import {
   formatTaskChangeBullet,
@@ -90,8 +89,4 @@ export function buildCombinedBriefing(events: BriefingEvent[]): CombinedBriefing
     voiceMessage: voiceParts.join(" "),
     overflowMessages: overflow,
   };
-}
-
-export function groupGitHubByRepo(activities: GitHubActivity[]): GitHubActivity[] {
-  return sortGitHubActivities(activities);
 }

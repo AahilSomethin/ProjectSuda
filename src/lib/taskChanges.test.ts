@@ -72,6 +72,12 @@ describe("taskChanges", () => {
     expect(changes).toHaveLength(0);
   });
 
+  it("prunes deleted tasks from cache", () => {
+    const baseline = establishBaseline(EMPTY_TASK_CACHE, [task(), task({ id: "ENG-2", linearId: "uuid-2" })]);
+    const { nextCache } = detectTaskChanges(baseline, [task()]);
+    expect(Object.keys(nextCache.snapshots)).toEqual(["ENG-1"]);
+  });
+
   it("builds stable fingerprints", () => {
     const fp1 = buildTaskFingerprint(task({ description: "abc" }));
     const fp2 = buildTaskFingerprint(task({ description: "abc" }));

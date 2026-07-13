@@ -19,6 +19,8 @@ pub enum IntegrationStatus {
 pub struct IntegrationError {
     pub http_status: u16,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reset_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,6 +47,7 @@ impl<T> IntegrationResult<T> {
             error: Some(IntegrationError {
                 http_status: 0,
                 message: message.into(),
+                rate_limit_reset_at: None,
             }),
         }
     }
@@ -56,17 +59,23 @@ impl<T> IntegrationResult<T> {
             error: Some(IntegrationError {
                 http_status,
                 message: message.into(),
+                rate_limit_reset_at: None,
             }),
         }
     }
 
-    pub fn temporarily_unavailable(http_status: u16, message: impl Into<String>) -> Self {
+    pub fn temporarily_unavailable(
+        http_status: u16,
+        message: impl Into<String>,
+        rate_limit_reset_at: Option<u64>,
+    ) -> Self {
         Self {
             status: IntegrationStatus::TemporarilyUnavailable,
             data: None,
             error: Some(IntegrationError {
                 http_status,
                 message: message.into(),
+                rate_limit_reset_at,
             }),
         }
     }

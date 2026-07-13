@@ -8,6 +8,7 @@ export type IntegrationStatus =
 export interface IntegrationError {
   httpStatus: number;
   message: string;
+  rateLimitResetAt?: number | null;
 }
 
 export interface IntegrationResult<T> {
@@ -63,7 +64,11 @@ export type GitHubActivity =
       url?: string;
     };
 
+export const GITHUB_MONITOR_STATE_VERSION = 1;
+export const TASK_CACHE_VERSION = 1;
+
 export interface GitHubMonitorState {
+  version?: number;
   processedEventIds: string[];
   branchHeads: Record<string, string>;
   prSnapshots?: Record<string, string>;
@@ -149,12 +154,16 @@ export interface LinearBriefingResponse {
   rawTasks: BriefingRawTask[];
 }
 
+export type TransmissionKind = "meaningful-activity" | "status" | "idle";
+
 export interface TransmissionPayload {
   title: string;
   message: string;
   /** Optional shorter text for TTS; defaults to message when omitted */
   voiceMessage?: string;
   type: TransmissionType;
+  kind: TransmissionKind;
+  transmissionId?: string;
   voiceEnabled?: boolean;
   characterVisible?: boolean;
   /** Skip the 3s GIF intro — used for idle/empty status messages */

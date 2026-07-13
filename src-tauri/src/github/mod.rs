@@ -24,18 +24,24 @@ fn github_owner() -> Option<String> {
 }
 
 fn github_repositories() -> Vec<String> {
-    std::env::var("GITHUB_REPOSITORIES")
+    let mut repos: Vec<String> = std::env::var("GITHUB_REPOSITORIES")
         .unwrap_or_default()
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .collect()
+        .collect();
+    repos.sort();
+    repos.dedup();
+    repos
 }
+
+const MIN_POLL_INTERVAL_SECONDS: u64 = 15;
 
 pub fn github_poll_interval_seconds() -> u64 {
     std::env::var("GITHUB_POLL_INTERVAL_SECONDS")
         .ok()
-        .and_then(|v| v.parse().ok())
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|value| value.max(MIN_POLL_INTERVAL_SECONDS))
         .unwrap_or(60)
 }
 
@@ -64,9 +70,7 @@ pub fn github_status() -> GitHubStatus {
 }
 
 #[tauri::command]
-pub async fn github_poll(
-    state: GitHubMonitorState,
-) -> IntegrationResult<GitHubPollResponse> {
+pub async fn github_poll(state: GitHubMonitorState) -> IntegrationResult<GitHubPollResponse> {
     if !github_configured() {
         return IntegrationResult::disabled("GitHub is not configured");
     }
@@ -85,6 +89,7 @@ pub async fn github_poll(
                 error: Some(IntegrationError {
                     http_status: error.http_status,
                     message: error.message,
+                    rate_limit_reset_at: None,
                 }),
             };
         }
@@ -106,7 +111,9 @@ pub async fn github_poll(
                     } else {
                         IntegrationStatus::AuthenticationFailed
                     }
-                } else if error.http_status == 429 || error.http_status >= 500 || error.http_status == 0
+                } else if error.http_status == 429
+                    || error.http_status >= 500
+                    || error.http_status == 0
                 {
                     IntegrationStatus::TemporarilyUnavailable
                 } else {
@@ -134,6 +141,7 @@ pub async fn github_poll(
                     error: Some(IntegrationError {
                         http_status: error.http_status,
                         message: error.message,
+                        rate_limit_reset_at: error.rate_limit_reset.map(|ts| ts * 1000),
                     }),
                 };
             }
@@ -154,7 +162,10 @@ pub async fn github_poll(
         );
     } else if !activities.is_empty() {
         for activity in &activities {
-            log_integration("GitHub", format!("New event: {}", activity_summary(activity)));
+            log_integration(
+                "GitHub",
+                format!("New event: {}", activity_summary(activity)),
+            );
         }
     }
 
@@ -189,7 +200,9 @@ fn activity_summary(activity: &types::GitHubActivity) -> String {
             pull_request_number,
             ..
         } => format!("merge {repository}#{pull_request_number}"),
-        types::GitHubActivity::BranchCreated { repository, branch, .. } => {
+        types::GitHubActivity::BranchCreated {
+            repository, branch, ..
+        } => {
             format!("branch {repository}/{branch}")
         }
         types::GitHubActivity::PullRequestUpdated {

@@ -6,6 +6,7 @@ import {
 import {
   establishBaseline,
   loadTaskCache,
+  pruneSnapshotsToTasks,
   saveTaskCache,
   snapshotFromTask,
   type TaskCacheState,
@@ -72,7 +73,10 @@ export function detectTaskChanges(
   }
 
   const changes: TaskChange[] = [];
-  let nextCache = { ...cache, snapshots: { ...cache.snapshots } };
+  let nextCache = {
+    ...cache,
+    snapshots: { ...cache.snapshots },
+  };
 
   for (const task of tasks) {
     const existing = cache.snapshots[task.id];
@@ -131,6 +135,8 @@ export function detectTaskChanges(
       };
     }
   }
+
+  nextCache = pruneSnapshotsToTasks(nextCache, tasks);
 
   return { changes, nextCache };
 }

@@ -37,10 +37,7 @@ mod tests {
             with_auth_type(Some("personal_api_key"), "lin_api_abc123"),
             "lin_api_abc123"
         );
-        assert_eq!(
-            with_auth_type(None, "lin_api_abc123"),
-            "lin_api_abc123"
-        );
+        assert_eq!(with_auth_type(None, "lin_api_abc123"), "lin_api_abc123");
     }
 
     #[test]

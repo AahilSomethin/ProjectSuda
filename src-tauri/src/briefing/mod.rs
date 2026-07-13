@@ -88,22 +88,18 @@ pub struct LinearBriefingResponse {
     pub raw_tasks: Vec<BriefingRawTask>,
 }
 
-
 fn key_present(key: &str) -> bool {
     std::env::var(key)
         .map(|value| !value.trim().is_empty())
         .unwrap_or(false)
 }
 
-
 fn briefing_timezone() -> String {
     std::env::var("SUDA_TIMEZONE").unwrap_or_else(|_| DEFAULT_TIMEZONE.to_string())
 }
 
 pub fn today_in_timezone(tz_name: &str) -> NaiveDate {
-    let tz: Tz = tz_name
-        .parse()
-        .unwrap_or(chrono_tz::Indian::Maldives);
+    let tz: Tz = tz_name.parse().unwrap_or(chrono_tz::Indian::Maldives);
     Utc::now().with_timezone(&tz).date_naive()
 }
 
@@ -264,7 +260,10 @@ pub fn build_deterministic_briefing(tasks: &[RawLinearTask]) -> BriefingContent 
             if parsed < today {
                 Some(format!("{} ({}) is overdue.", task.title, task.identifier))
             } else if parsed == today {
-                Some(format!("{} ({}) is due today.", task.title, task.identifier))
+                Some(format!(
+                    "{} ({}) is due today.",
+                    task.title, task.identifier
+                ))
             } else {
                 None
             }
@@ -285,7 +284,6 @@ pub fn build_deterministic_briefing(tasks: &[RawLinearTask]) -> BriefingContent 
         first_action,
     }
 }
-
 
 fn linear_api_key() -> Option<String> {
     std::env::var("LINEAR_API_KEY")
@@ -346,6 +344,7 @@ pub async fn poll_linear_briefing() -> IntegrationResult<LinearBriefingResponse>
                 error: Some(IntegrationError {
                     http_status: error.http_status,
                     message: error.message,
+                    rate_limit_reset_at: None,
                 }),
             }
         }

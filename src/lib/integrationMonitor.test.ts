@@ -219,6 +219,34 @@ describe("integrationMonitor", () => {
     expect(integrationMonitor.__getUnifiedTimerId()).not.toBeNull();
   });
 
+  it("skips duplicate transmissions with the same dedup key", async () => {
+    const linearChange: TaskChange = {
+      kind: "updated",
+      task: {
+        id: "MIND-42",
+        linearId: "uuid",
+        title: "Task",
+        status: "Done",
+        updatedAt: "2026-07-13T10:00:00Z",
+      },
+      changes: ["status updated"],
+    };
+
+    mockDetectTaskChanges.mockReturnValue({
+      changes: [linearChange],
+      nextCache: { baselineEstablished: true, snapshots: {} },
+    });
+
+    const transmissions: string[] = [];
+    integrationMonitor.start((payload) => {
+      transmissions.push(payload.message);
+    });
+
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(transmissions).toHaveLength(1);
+  });
+
   it("manual retry clears auth failure lock", async () => {
     mockFetchLinearPoll.mockResolvedValue({
       status: "authentication_failed",

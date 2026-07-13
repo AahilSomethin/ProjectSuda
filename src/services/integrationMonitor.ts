@@ -16,8 +16,15 @@ import {
   appendActivityHistory,
   loadGitHubMonitorState,
   saveGitHubMonitorState,
+  statesEqual,
 } from "../lib/githubMonitorState";
 import { logOnce, logOnStateChange, resetIntegrationLog } from "../lib/integrationLog";
+import {
+  buildTransmissionDedupKey,
+  isDuplicateTransmission,
+  rememberTransmission,
+  shouldOpenTransmission,
+} from "../lib/notificationGuards";
 import { createCombinedBriefingPayload } from "../lib/transmissions";
 import {
   fetchGitHubPoll,
@@ -58,6 +65,7 @@ interface IntegrationRuntime {
   disabled: boolean;
   intervalMs: number;
   message?: string;
+  rateLimitResetAt: number | null;
 }
 
 function defaultRuntime(intervalMs: number): IntegrationRuntime {
@@ -69,11 +77,13 @@ function defaultRuntime(intervalMs: number): IntegrationRuntime {
     authFailed: false,
     disabled: false,
     intervalMs,
+    rateLimitResetAt: null,
   };
 }
 
 class IntegrationMonitorService {
   private started = false;
+  private cycleInFlight = false;
   private onTransmission: TransmissionHandler | null = null;
   private onStatusChange: StatusHandler | null = null;
   private linear = defaultRuntime(60_000);
@@ -82,6 +92,7 @@ class IntegrationMonitorService {
   private taskCache: TaskCacheState = getInitialTaskCache();
   private githubState: GitHubMonitorState = loadGitHubMonitorState();
   private announcedWarnings = new Set<string>();
+  private presentedTransmissionIds = new Set<string>();
 
   start(
     onTransmission: TransmissionHandler,
@@ -98,6 +109,7 @@ class IntegrationMonitorService {
   stop(): void {
     this.clearUnifiedTimer();
     this.started = false;
+    this.cycleInFlight = false;
     this.onTransmission = null;
     this.onStatusChange = null;
   }
@@ -140,6 +152,11 @@ class IntegrationMonitorService {
     await this.manualRetry("unified");
   }
 
+  private reloadPersistedState(): void {
+    this.taskCache = loadTaskCache();
+    this.githubState = loadGitHubMonitorState();
+  }
+
   private async initialize(): Promise<void> {
     const githubStatus = await fetchGitHubStatus();
     if (githubStatus.configured) {
@@ -162,18 +179,24 @@ class IntegrationMonitorService {
   private async manualRetry(
     integration: "linear" | "github" | "unified",
   ): Promise<void> {
+    if (this.cycleInFlight) return;
+
+    this.reloadPersistedState();
+
     if (integration === "linear" || integration === "unified") {
       this.linear.authFailed = false;
       this.linear.failureCount = 0;
       this.linear.disabled = false;
-      resetIntegrationLog("linear");
+      this.linear.rateLimitResetAt = null;
+      resetIntegrationLog("Linear");
     }
 
     if (integration === "github" || integration === "unified") {
       this.github.authFailed = false;
       this.github.failureCount = 0;
       this.github.disabled = false;
-      resetIntegrationLog("github");
+      this.github.rateLimitResetAt = null;
+      resetIntegrationLog("GitHub");
     }
 
     this.clearUnifiedTimer();
@@ -202,6 +225,15 @@ class IntegrationMonitorService {
     return intervals.length > 0 ? Math.max(...intervals) : 60_000;
   }
 
+  private getRateLimitDelayMs(): number {
+    const now = Date.now();
+    const delays: number[] = [];
+    if (this.github.rateLimitResetAt && this.github.rateLimitResetAt > now) {
+      delays.push(this.github.rateLimitResetAt - now);
+    }
+    return delays.length > 0 ? Math.max(...delays) : 0;
+  }
+
   private getUnifiedBackoffMs(): number {
     const baseInterval = this.getUnifiedIntervalMs();
     const failureCounts: number[] = [];
@@ -213,7 +245,9 @@ class IntegrationMonitorService {
     }
     const maxFailures =
       failureCounts.length > 0 ? Math.max(...failureCounts) : 0;
-    return getBackoffDelayMs(maxFailures, baseInterval);
+    const backoff = getBackoffDelayMs(maxFailures, baseInterval);
+    const rateLimitDelay = this.getRateLimitDelayMs();
+    return Math.max(backoff, rateLimitDelay);
   }
 
   private scheduleNext(): void {
@@ -238,22 +272,29 @@ class IntegrationMonitorService {
   }
 
   private async runUnifiedPollCycle(): Promise<void> {
-    const linearChanges = this.linear.disabled || this.linear.authFailed
-      ? []
-      : await this.pollLinear();
-    const githubActivities = this.github.disabled || this.github.authFailed
-      ? []
-      : await this.pollGitHub();
+    if (this.cycleInFlight) return;
+    this.cycleInFlight = true;
 
-    this.logAuthWarnings();
+    try {
+      const linearChanges = this.linear.disabled || this.linear.authFailed
+        ? []
+        : await this.pollLinear();
+      const githubActivities = this.github.disabled || this.github.authFailed
+        ? []
+        : await this.pollGitHub();
 
-    const events = createBriefingEvents({
-      linearChanges,
-      githubActivities,
-    });
+      this.logAuthWarnings();
 
-    this.presentEvents(events);
-    this.emitStatus();
+      const events = createBriefingEvents({
+        linearChanges,
+        githubActivities,
+      });
+
+      this.presentEvents(events);
+      this.emitStatus();
+    } finally {
+      this.cycleInFlight = false;
+    }
   }
 
   private logAuthWarnings(): void {
@@ -271,18 +312,30 @@ class IntegrationMonitorService {
   }
 
   private presentEvents(events: BriefingEvent[]): void {
-    if (events.length === 0 || !this.onTransmission) return;
+    if (!shouldOpenTransmission(events) || !this.onTransmission) return;
 
     const briefing = buildCombinedBriefing(events);
     if (!briefing) return;
+
+    const dedupKey =
+      briefing.voiceMessage.trim().length > 0
+        ? buildTransmissionDedupKey(events, briefing.voiceMessage)
+        : buildTransmissionDedupKey(events, briefing.message);
+
+    if (isDuplicateTransmission(dedupKey, this.presentedTransmissionIds)) {
+      return;
+    }
 
     if (briefing.overflowMessages.length > 0) {
       appendActivityHistory(briefing.overflowMessages);
     }
 
-    this.onTransmission(
-      createCombinedBriefingPayload(briefing, { voiceEnabled: true }),
-    );
+    const payload = createCombinedBriefingPayload(briefing, events, {
+      voiceEnabled: true,
+    });
+
+    rememberTransmission(dedupKey, this.presentedTransmissionIds);
+    this.onTransmission(payload);
   }
 
   private async pollLinear(): Promise<TaskChange[]> {
@@ -336,6 +389,7 @@ class IntegrationMonitorService {
       this.linear.failureCount = 0;
       this.linear.authFailed = false;
       this.linear.disabled = false;
+      this.linear.rateLimitResetAt = null;
       return;
     }
 
@@ -358,40 +412,10 @@ class IntegrationMonitorService {
     }
   }
 
-  private async pollGitHub(): Promise<GitHubActivity[]> {
-    if (this.github.pollInFlight) return [];
-    this.github.pollInFlight = true;
-    const previousStatus = this.github.status;
-
-    try {
-      const result = await fetchGitHubPoll(this.githubState);
-      this.applyGitHubResult(result.status, result.error?.message);
-
-      if (result.status === "connected" && result.data) {
-        this.githubState = result.data.updatedState;
-        saveGitHubMonitorState(this.githubState);
-        this.github.lastSuccessfulPollAt =
-          result.data.updatedState.lastSuccessfulPollAt ?? null;
-        return result.data.activities;
-      }
-      return [];
-    } catch {
-      this.applyGitHubResult("temporarily_unavailable", "GitHub poll failed");
-      return [];
-    } finally {
-      this.github.pollInFlight = false;
-      logOnStateChange(
-        "GitHub",
-        previousStatus,
-        this.github.status,
-        `Status: ${this.github.status}`,
-      );
-    }
-  }
-
   private applyGitHubResult(
     status: IntegrationStatus,
     message?: string,
+    rateLimitResetAt?: number | null,
   ): void {
     this.github.status = status;
     if (message) {
@@ -401,6 +425,7 @@ class IntegrationMonitorService {
     if (status === "connected") {
       this.github.failureCount = 0;
       this.github.authFailed = false;
+      this.github.rateLimitResetAt = null;
       return;
     }
 
@@ -420,6 +445,52 @@ class IntegrationMonitorService {
 
     if (status === "temporarily_unavailable") {
       this.github.failureCount += 1;
+      if (rateLimitResetAt) {
+        this.github.rateLimitResetAt = rateLimitResetAt;
+      }
+    }
+  }
+
+  private async pollGitHub(): Promise<GitHubActivity[]> {
+    if (this.github.pollInFlight) return [];
+    this.github.pollInFlight = true;
+    const previousStatus = this.github.status;
+
+    try {
+      const result = await fetchGitHubPoll(this.githubState);
+      const rateLimitResetAt = result.error?.rateLimitResetAt
+        ? result.error.rateLimitResetAt
+        : null;
+      this.applyGitHubResult(
+        result.status,
+        result.error?.message,
+        rateLimitResetAt,
+      );
+
+      if (result.status === "connected" && result.data) {
+        const nextState = result.data.updatedState;
+        if (!statesEqual(this.githubState, nextState)) {
+          this.githubState = nextState;
+          saveGitHubMonitorState(this.githubState);
+        } else {
+          this.githubState = nextState;
+        }
+        this.github.lastSuccessfulPollAt =
+          result.data.updatedState.lastSuccessfulPollAt ?? null;
+        return result.data.activities;
+      }
+      return [];
+    } catch {
+      this.applyGitHubResult("temporarily_unavailable", "GitHub poll failed");
+      return [];
+    } finally {
+      this.github.pollInFlight = false;
+      logOnStateChange(
+        "GitHub",
+        previousStatus,
+        this.github.status,
+        `Status: ${this.github.status}`,
+      );
     }
   }
 
@@ -439,12 +510,17 @@ class IntegrationMonitorService {
     return this.unifiedTimerId;
   }
 
+  __getPresentedTransmissionIds() {
+    return this.presentedTransmissionIds;
+  }
+
   __resetForTests(): void {
     this.stop();
     this.started = false;
     this.linear = defaultRuntime(60_000);
     this.github = defaultRuntime(60_000);
     this.announcedWarnings.clear();
+    this.presentedTransmissionIds.clear();
     this.taskCache = getInitialTaskCache();
     this.githubState = loadGitHubMonitorState();
   }
@@ -459,8 +535,4 @@ export function getBackoffDelayMs(failureCount: number, intervalMs: number): num
 
 export function __isMonitorStarted(): boolean {
   return (integrationMonitor as unknown as { started: boolean }).started;
-}
-
-export function __reloadTaskCacheFromStorage(): void {
-  integrationMonitor.syncTaskCache(loadTaskCache());
 }

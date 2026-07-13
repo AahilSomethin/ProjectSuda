@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  markBaselineFromTasks,
-} from "../lib/taskChanges";
-import type { TaskCacheState } from "../lib/taskCache";
-import { getInitialTaskCache } from "../lib/taskChanges";
-import { devLog } from "../lib/devLog";
-import {
   BriefingError,
-  evaluateStartupImportance,
   fetchLinearPoll,
   getCachedBriefing,
+  setCachedBriefing,
 } from "../services/briefing";
 import { SUDA_MESSAGES } from "../lib/transmissions";
 import type { LinearBriefingResponse } from "../types";
@@ -19,11 +13,14 @@ export interface BriefingLoadResult {
   error: string | null;
 }
 
+/**
+ * Loads the initial Linear briefing for UI activity state.
+ * Polling and change detection are owned by IntegrationMonitor.
+ */
 export function useSudaBriefing() {
   const [briefing, setBriefing] = useState<LinearBriefingResponse | null>(null);
   const [briefingLoading, setBriefingLoading] = useState(false);
   const [briefingError, setBriefingError] = useState<string | null>(null);
-  const cacheRef = useRef<TaskCacheState>(getInitialTaskCache());
   const briefingRequestRef = useRef(0);
   const startupHandledRef = useRef(false);
 
@@ -39,6 +36,7 @@ export function useSudaBriefing() {
       }
 
       if (result.status === "connected" && result.data) {
+        setCachedBriefing(result.data);
         setBriefing(result.data);
         return { briefing: result.data, error: null };
       }
@@ -72,12 +70,13 @@ export function useSudaBriefing() {
     }
   }, []);
 
-  const establishBaseline = useCallback((tasks: import("../types").LinearTask[]) => {
-    cacheRef.current = markBaselineFromTasks(cacheRef.current, tasks);
-    devLog("[SUDA] task cache baseline established", tasks.length);
-  }, []);
-
   useEffect(() => {
+    const cached = getCachedBriefing();
+    if (cached) {
+      setBriefing(cached);
+      setBriefingLoading(false);
+      return;
+    }
     void loadBriefing();
   }, [loadBriefing]);
 
@@ -91,8 +90,6 @@ export function useSudaBriefing() {
     briefingLoading,
     briefingError,
     loadBriefing,
-    establishBaseline,
-    evaluateStartupImportance,
     startupHandledRef,
     getLatestBriefing,
   };

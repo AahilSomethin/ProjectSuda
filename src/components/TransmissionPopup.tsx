@@ -116,6 +116,13 @@ function MessagePhase({
     voiceChunkForPage,
     shouldPlayVoice,
     fallbackVoice,
+    {
+      dedupKey: voiceChunkForPage
+        ? `${voiceChunkForPage}:${currentPage}`
+        : undefined,
+      kind: voiceEnabled ? "meaningful-activity" : "status",
+      voiceEnabled,
+    },
   );
 
   useEffect(() => {

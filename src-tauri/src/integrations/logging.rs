@@ -30,12 +30,7 @@ pub fn log_integration(integration: &str, message: impl AsRef<str>) {
     println!("[SUDA][{integration}] {}", message.as_ref());
 }
 
-pub fn log_state_change(
-    integration: &str,
-    previous: &str,
-    next: &str,
-    message: impl AsRef<str>,
-) {
+pub fn log_state_change(integration: &str, previous: &str, next: &str, message: impl AsRef<str>) {
     if previous != next {
         log_integration(integration, message);
     }

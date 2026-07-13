@@ -141,7 +141,6 @@ pub struct RawLinearTask {
     pub assignee: Option<String>,
 }
 
-
 pub fn truncate_body(body: &str, max_len: usize) -> String {
     if body.len() <= max_len {
         return body.to_string();
@@ -166,7 +165,13 @@ pub fn extract_graphql_error_messages(body: &str) -> Option<Vec<String>> {
 }
 
 async fn execute_graphql(query: &str, api_key: &str) -> Result<String, LinearApiError> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|error| LinearApiError {
+            http_status: 0,
+            message: format!("Failed to build HTTP client: {error}"),
+        })?;
     let body = serde_json::json!({ "query": query });
     let auth_header = build_linear_auth_header(api_key);
 
@@ -215,12 +220,11 @@ pub async fn fetch_viewer(api_key: &str) -> Result<LinearViewer, LinearApiError>
         data: Option<LinearViewerQueryData>,
     }
 
-    let parsed: ViewerEnvelope = serde_json::from_str(&response_body).map_err(|error| {
-        LinearApiError {
+    let parsed: ViewerEnvelope =
+        serde_json::from_str(&response_body).map_err(|error| LinearApiError {
             http_status: 200,
             message: format!("Failed to parse Linear viewer response: {error}"),
-        }
-    })?;
+        })?;
 
     parsed
         .data
@@ -295,12 +299,11 @@ pub async fn fetch_my_issues(api_key: &str) -> Result<Vec<RawLinearTask>, Linear
         data: Option<LinearIssuesQueryData>,
     }
 
-    let parsed: IssuesEnvelope = serde_json::from_str(&response_body).map_err(|error| {
-        LinearApiError {
+    let parsed: IssuesEnvelope =
+        serde_json::from_str(&response_body).map_err(|error| LinearApiError {
             http_status: 200,
             message: format!("Failed to parse Linear issues response: {error}"),
-        }
-    })?;
+        })?;
 
     let data = parsed.data.ok_or_else(|| LinearApiError {
         http_status: 200,
@@ -343,10 +346,25 @@ mod tests {
     fn sorts_by_priority_then_due_date_then_updated_at() {
         let mut tasks = vec![
             task("low", 4, Some("2026-07-10"), Some("2026-07-08T10:00:00Z")),
-            task("urgent", 1, Some("2026-07-12"), Some("2026-07-07T10:00:00Z")),
-            task("high-soon", 2, Some("2026-07-09"), Some("2026-07-06T10:00:00Z")),
+            task(
+                "urgent",
+                1,
+                Some("2026-07-12"),
+                Some("2026-07-07T10:00:00Z"),
+            ),
+            task(
+                "high-soon",
+                2,
+                Some("2026-07-09"),
+                Some("2026-07-06T10:00:00Z"),
+            ),
             task("none", 0, None, Some("2026-07-09T10:00:00Z")),
-            task("high-recent", 2, Some("2026-07-09"), Some("2026-07-08T12:00:00Z")),
+            task(
+                "high-recent",
+                2,
+                Some("2026-07-09"),
+                Some("2026-07-08T12:00:00Z"),
+            ),
         ];
 
         sort_tasks(&mut tasks);

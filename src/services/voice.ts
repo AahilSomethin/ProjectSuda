@@ -1,5 +1,8 @@
 // Short voice text for ElevenLabs TTS — routed through a Tauri command so the API key stays server-side.
 import { invoke } from "@tauri-apps/api/core";
+import type { TransmissionKind, WidgetSettings } from "../types";
+
+const MAX_SPOKEN_VOICE_KEYS = 200;
 
 let voiceMuted = false;
 let speakGeneration = 0;
@@ -8,6 +11,7 @@ let configMissingWarningShown = false;
 let diagnosticsLogged = false;
 let lastVoiceProvider: "elevenlabs" | "browser" | null = null;
 let audioPlaybackUnlocked = false;
+const spokenVoiceKeys = new Set<string>();
 // Minimal silent WAV — primes WebView autoplay during a user gesture.
 const SILENT_AUDIO_DATA_URI =
   "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -180,7 +184,55 @@ export async function debugVoiceStatus(): Promise<void> {
   });
 }
 
-export function muteVoice(muted: boolean): void {  voiceMuted = muted;
+export function canInvokeElevenLabs(input: {
+  kind: TransmissionKind;
+  voiceEnabled?: boolean;
+  voiceMessage?: string;
+  muted?: boolean;
+}): boolean {
+  return (
+    input.kind === "meaningful-activity" &&
+    input.voiceEnabled === true &&
+    !input.muted &&
+    !voiceMuted &&
+    (input.voiceMessage?.trim().length ?? 0) > 0
+  );
+}
+
+export function hasSpokenVoiceKey(key: string): boolean {
+  return spokenVoiceKeys.has(key);
+}
+
+export function rememberSpokenVoiceKey(key: string): void {
+  if (spokenVoiceKeys.has(key)) return;
+  spokenVoiceKeys.add(key);
+  while (spokenVoiceKeys.size > MAX_SPOKEN_VOICE_KEYS) {
+    const oldest = spokenVoiceKeys.values().next().value;
+    if (oldest === undefined) break;
+    spokenVoiceKeys.delete(oldest);
+  }
+}
+
+export function __resetSpokenVoiceKeysForTests(): void {
+  spokenVoiceKeys.clear();
+}
+
+export function canInvokeVoiceFromSettings(
+  input: {
+    kind: TransmissionKind;
+    voiceEnabled?: boolean;
+    voiceMessage?: string;
+  },
+  settings: WidgetSettings,
+): boolean {
+  return canInvokeElevenLabs({
+    ...input,
+    muted: settings.muteVoice,
+  });
+}
+
+export function muteVoice(muted: boolean): void {
+  voiceMuted = muted;
   if (muted) {
     cancelSpeech();
   }
@@ -488,6 +540,9 @@ async function speakWithElevenLabs(
 
 export interface SpeakOptions {
   fallbackVoice?: boolean;
+  dedupKey?: string;
+  kind?: TransmissionKind;
+  voiceEnabled?: boolean;
 }
 
 export function speakText(
@@ -495,7 +550,24 @@ export function speakText(
   callbacks?: VoiceCallbacks,
   options?: SpeakOptions,
 ): void {
-  if (voiceMuted || !text.trim()) {
+  const trimmed = text.trim();
+  const kind = options?.kind ?? "meaningful-activity";
+  const voiceEnabled = options?.voiceEnabled ?? true;
+
+  if (
+    !canInvokeElevenLabs({
+      kind,
+      voiceEnabled,
+      voiceMessage: trimmed,
+      muted: voiceMuted,
+    })
+  ) {
+    callbacks?.onEnd?.();
+    return;
+  }
+
+  const dedupKey = options?.dedupKey ?? trimmed;
+  if (hasSpokenVoiceKey(dedupKey)) {
     callbacks?.onEnd?.();
     return;
   }
@@ -508,15 +580,18 @@ export function speakText(
 
   void (async () => {
     const usedElevenLabs = await speakWithElevenLabs(
-      text,
+      trimmed,
       callbacks,
       generation,
       allowBrowserFallback,
     );
     if (generation !== speakGeneration) return;
     if (!usedElevenLabs && allowBrowserFallback) {
-      speakWithBrowser(text, callbacks, generation);
-    } else if (!usedElevenLabs) {
+      rememberSpokenVoiceKey(dedupKey);
+      speakWithBrowser(trimmed, callbacks, generation);
+    } else if (usedElevenLabs) {
+      rememberSpokenVoiceKey(dedupKey);
+    } else {
       callbacks?.onEnd?.();
     }
   })();

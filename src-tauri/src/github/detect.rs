@@ -8,8 +8,13 @@ pub async fn poll_repository(
     repo: &str,
     notify_pull_requests: bool,
     state: &GitHubMonitorState,
-) -> Result<(Vec<GitHubActivity>, std::collections::HashMap<String, String>), crate::github::api::GitHubApiError>
-{
+) -> Result<
+    (
+        Vec<GitHubActivity>,
+        std::collections::HashMap<String, String>,
+    ),
+    crate::github::api::GitHubApiError,
+> {
     let mut activities = Vec::new();
     let mut branch_heads = state.branch_heads.clone();
 
@@ -52,7 +57,10 @@ pub async fn poll_repository(
                 if previous == &sha {
                     continue;
                 }
-                if !activities.iter().any(|a| matches!(a, GitHubActivity::Push { branch, .. } if branch == &name)) {
+                if !activities
+                    .iter()
+                    .any(|a| matches!(a, GitHubActivity::Push { branch, .. } if branch == &name))
+                {
                     // Branch head changed without a recent push event in feed — treat as push
                     activities.push(GitHubActivity::Push {
                         id: format!("{repo}:sha:{sha}"),
@@ -121,9 +129,15 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
     match event_type {
         "PushEvent" => {
             let payload = event.get("payload")?;
-            let forced = payload.get("forced").and_then(|v| v.as_bool()).unwrap_or(false);
+            let forced = payload
+                .get("forced")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let ref_name = payload.get("ref").and_then(|v| v.as_str()).unwrap_or("");
-            let branch = ref_name.strip_prefix("refs/heads/").unwrap_or(ref_name).to_string();
+            let branch = ref_name
+                .strip_prefix("refs/heads/")
+                .unwrap_or(ref_name)
+                .to_string();
             let commits = payload
                 .get("commits")
                 .and_then(|v| v.as_array())
@@ -147,7 +161,11 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
                 commit_messages,
                 forced,
                 occurred_at,
-                url: event.get("repo").and_then(|r| r.get("url")).and_then(|v| v.as_str()).map(str::to_string),
+                url: event
+                    .get("repo")
+                    .and_then(|r| r.get("url"))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
             })
         }
         "PullRequestEvent" => {
@@ -160,7 +178,10 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let merged = pull.get("merged").and_then(|v| v.as_bool()).unwrap_or(false);
+            let merged = pull
+                .get("merged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             let base_branch = pull
                 .get("base")
                 .and_then(|b| b.get("ref"))
@@ -173,7 +194,10 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let url = pull.get("html_url").and_then(|v| v.as_str()).map(str::to_string);
+            let url = pull
+                .get("html_url")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let merge_commit_sha = pull
                 .get("merge_commit_sha")
                 .and_then(|v| v.as_str())
@@ -209,11 +233,18 @@ fn activity_from_event(repo: &str, event: &serde_json::Value) -> Option<GitHubAc
         }
         "CreateEvent" => {
             let payload = event.get("payload")?;
-            let ref_type = payload.get("ref_type").and_then(|v| v.as_str()).unwrap_or("");
+            let ref_type = payload
+                .get("ref_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             if ref_type != "branch" {
                 return None;
             }
-            let branch = payload.get("ref").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let branch = payload
+                .get("ref")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             Some(GitHubActivity::BranchCreated {
                 id: unique_id,
                 repository: repo.to_string(),
@@ -245,7 +276,10 @@ fn activity_from_pull(
         .unwrap_or("")
         .to_string();
     let state = pull.get("state").and_then(|v| v.as_str()).unwrap_or("");
-    let url = pull.get("html_url").and_then(|v| v.as_str()).map(str::to_string);
+    let url = pull
+        .get("html_url")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
     let base_branch = pull
         .get("base")
         .and_then(|b| b.get("ref"))
@@ -330,6 +364,7 @@ pub fn filter_and_update_state(
         return (
             vec![],
             GitHubMonitorState {
+                version: 1,
                 processed_event_ids: processed,
                 branch_heads,
                 pr_snapshots,
@@ -359,6 +394,7 @@ pub fn filter_and_update_state(
     (
         notify,
         GitHubMonitorState {
+            version: 1,
             processed_event_ids: processed,
             branch_heads,
             pr_snapshots,
@@ -409,8 +445,9 @@ fn is_stale_pr_activity(
             occurred_at,
             action,
             ..
-        } if action == "updated" => snapshots.get(&pr_snapshot_key(repository, *pull_request_number))
-            == Some(occurred_at),
+        } if action == "updated" => {
+            snapshots.get(&pr_snapshot_key(repository, *pull_request_number)) == Some(occurred_at)
+        }
         _ => false,
     }
 }
@@ -419,9 +456,9 @@ fn dedupe_merge_and_push(activities: Vec<GitHubActivity>) -> Vec<GitHubActivity>
     let merge_shas: std::collections::HashSet<String> = activities
         .iter()
         .filter_map(|a| match a {
-            GitHubActivity::PullRequestMerged { merge_commit_sha, .. } => {
-                merge_commit_sha.clone()
-            }
+            GitHubActivity::PullRequestMerged {
+                merge_commit_sha, ..
+            } => merge_commit_sha.clone(),
             _ => None,
         })
         .collect();
@@ -456,7 +493,10 @@ fn dedupe_merge_and_push(activities: Vec<GitHubActivity>) -> Vec<GitHubActivity>
                 }
                 true
             }
-            GitHubActivity::PullRequestMerged { merge_commit_sha, .. } => true,
+            GitHubActivity::PullRequestMerged {
+                merge_commit_sha: _,
+                ..
+            } => true,
             _ => true,
         })
         .filter(|activity| {
@@ -512,12 +552,16 @@ mod tests {
 
         let deduped = dedupe_merge_and_push(activities);
         assert_eq!(deduped.len(), 1);
-        assert!(matches!(deduped[0], GitHubActivity::PullRequestMerged { .. }));
+        assert!(matches!(
+            deduped[0],
+            GitHubActivity::PullRequestMerged { .. }
+        ));
     }
 
     #[test]
     fn baseline_establishes_without_notifications() {
         let state = GitHubMonitorState {
+            version: 1,
             processed_event_ids: vec![],
             branch_heads: std::collections::HashMap::new(),
             pr_snapshots: std::collections::HashMap::new(),
@@ -535,10 +579,51 @@ mod tests {
             occurred_at: "2026-07-13T10:00:00Z".to_string(),
             url: None,
         }];
-        let (notify, next) = filter_and_update_state(&state, activities, std::collections::HashMap::new());
+        let (notify, next) =
+            filter_and_update_state(&state, activities, std::collections::HashMap::new());
         assert!(notify.is_empty());
         assert!(next.baseline_established);
         assert!(next.processed_event_ids.contains(&"suda:1".to_string()));
+    }
+
+    #[test]
+    fn duplicate_event_id_is_filtered() {
+        let state = GitHubMonitorState {
+            version: 1,
+            processed_event_ids: vec!["suda:1".to_string()],
+            branch_heads: std::collections::HashMap::new(),
+            pr_snapshots: std::collections::HashMap::new(),
+            last_successful_poll_at: Some("2026-07-13T10:00:00Z".to_string()),
+            baseline_established: true,
+        };
+        let activities = vec![GitHubActivity::Push {
+            id: "suda:1".to_string(),
+            repository: "suda".to_string(),
+            branch: "main".to_string(),
+            actor: "Aahil".to_string(),
+            commit_count: 1,
+            commit_messages: vec![],
+            forced: false,
+            occurred_at: "2026-07-13T10:00:00Z".to_string(),
+            url: None,
+        }];
+        let (notify, _) =
+            filter_and_update_state(&state, activities, std::collections::HashMap::new());
+        assert!(notify.is_empty());
+    }
+
+    #[test]
+    fn empty_activities_after_baseline_notify_nothing() {
+        let state = GitHubMonitorState {
+            version: 1,
+            processed_event_ids: vec![],
+            branch_heads: std::collections::HashMap::new(),
+            pr_snapshots: std::collections::HashMap::new(),
+            last_successful_poll_at: Some("2026-07-13T10:00:00Z".to_string()),
+            baseline_established: true,
+        };
+        let (notify, _) = filter_and_update_state(&state, vec![], std::collections::HashMap::new());
+        assert!(notify.is_empty());
     }
 
     #[test]

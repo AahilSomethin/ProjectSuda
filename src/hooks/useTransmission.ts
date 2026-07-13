@@ -12,6 +12,7 @@ const IDLE_TRANSMISSION: ActiveTransmission = {
   title: "",
   message: "",
   type: "info",
+  kind: "idle",
 };
 
 export function useTransmission(settings: WidgetSettings) {

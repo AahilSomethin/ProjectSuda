@@ -1,4 +1,5 @@
 import type { LinearTask } from "../types";
+import { TASK_CACHE_VERSION } from "../types";
 
 export interface TaskSnapshot {
   id: string;
@@ -10,6 +11,7 @@ export interface TaskSnapshot {
 }
 
 export interface TaskCacheState {
+  version?: number;
   baselineEstablished: boolean;
   snapshots: Record<string, TaskSnapshot>;
 }
@@ -17,6 +19,7 @@ export interface TaskCacheState {
 const CACHE_KEY = "suda-task-cache";
 
 export const EMPTY_TASK_CACHE: TaskCacheState = {
+  version: TASK_CACHE_VERSION,
   baselineEstablished: false,
   snapshots: {},
 };
@@ -41,50 +44,63 @@ export function snapshotFromTask(task: LinearTask): TaskSnapshot {
   };
 }
 
+function migrateTaskCache(parsed: Partial<TaskCacheState>): TaskCacheState {
+  return {
+    version: parsed.version ?? TASK_CACHE_VERSION,
+    baselineEstablished: parsed.baselineEstablished ?? false,
+    snapshots: parsed.snapshots ?? {},
+  };
+}
+
 export function loadTaskCache(): TaskCacheState {
+  if (typeof localStorage === "undefined") {
+    return { ...EMPTY_TASK_CACHE, snapshots: {} };
+  }
+
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return { ...EMPTY_TASK_CACHE, snapshots: {} };
-    const parsed = JSON.parse(raw) as TaskCacheState;
-    return {
-      baselineEstablished: parsed.baselineEstablished ?? false,
-      snapshots: parsed.snapshots ?? {},
-    };
+    const parsed = JSON.parse(raw) as Partial<TaskCacheState>;
+    return migrateTaskCache(parsed);
   } catch {
     return { ...EMPTY_TASK_CACHE, snapshots: {} };
   }
 }
 
 export function saveTaskCache(state: TaskCacheState): void {
-  localStorage.setItem(CACHE_KEY, JSON.stringify(state));
+  if (typeof localStorage === "undefined") return;
+  const normalized: TaskCacheState = {
+    ...state,
+    version: TASK_CACHE_VERSION,
+  };
+  localStorage.setItem(CACHE_KEY, JSON.stringify(normalized));
 }
 
 export function establishBaseline(
-  state: TaskCacheState,
+  _cache: TaskCacheState,
   tasks: LinearTask[],
 ): TaskCacheState {
-  const snapshots: Record<string, TaskSnapshot> = { ...state.snapshots };
+  const snapshots: Record<string, TaskSnapshot> = {};
   for (const task of tasks) {
     snapshots[task.id] = snapshotFromTask(task);
   }
   return {
+    version: TASK_CACHE_VERSION,
     baselineEstablished: true,
     snapshots,
   };
 }
 
-export function upsertSnapshots(
-  state: TaskCacheState,
+export function pruneSnapshotsToTasks(
+  cache: TaskCacheState,
   tasks: LinearTask[],
-  patch?: (snapshot: TaskSnapshot, task: LinearTask) => TaskSnapshot,
 ): TaskCacheState {
-  const snapshots = { ...state.snapshots };
-  for (const task of tasks) {
-    const base = snapshotFromTask(task);
-    const existing = snapshots[task.id];
-    snapshots[task.id] = patch
-      ? patch({ ...existing, ...base }, task)
-      : { ...existing, ...base };
+  const taskIds = new Set(tasks.map((task) => task.id));
+  const snapshots: Record<string, TaskSnapshot> = {};
+  for (const [id, snapshot] of Object.entries(cache.snapshots)) {
+    if (taskIds.has(id)) {
+      snapshots[id] = snapshot;
+    }
   }
-  return { ...state, snapshots };
+  return { ...cache, snapshots };
 }

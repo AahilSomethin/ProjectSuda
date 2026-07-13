@@ -12,7 +12,8 @@ import {
 } from "../lib/transmissions";
 import { setSettingsOverlay, setWindowMode } from "../lib/windowMode";
 import type { IntegrationViewStatus, TransmissionPayload } from "../types";
-import { briefingToLinearTasks } from "../services/briefing";
+import { canInvokeVoice } from "../lib/notificationGuards";
+import { getCachedBriefing, briefingToLinearTasks } from "../services/briefing";
 import { integrationMonitor } from "../services/integrationMonitor";
 import {
   primeBrowserSpeechForFallback,
@@ -36,7 +37,6 @@ export default function SudaWidget() {
   } = useTransmission(settings);
 
   const {
-    briefing,
     briefingLoading,
     startupHandledRef,
   } = useSudaBriefing();
@@ -76,14 +76,13 @@ export default function SudaWidget() {
     (payload: TransmissionPayload) => {
       pendingSettingsOpenRef.current = false;
       setSettingsOpen(false);
-      const voiceEnabled =
-        payload.voiceEnabled === true && !settings.muteVoice;
+      const voiceEnabled = canInvokeVoice(payload, settings);
       showTransmission({
         ...payload,
         voiceEnabled,
       });
     },
-    [settings.muteVoice, showTransmission],
+    [settings, showTransmission],
   );
 
   useEffect(() => {
@@ -94,6 +93,10 @@ export default function SudaWidget() {
       },
       (statuses) => setIntegrationStatuses(statuses),
     );
+
+    return () => {
+      integrationMonitor.stop();
+    };
   }, [presentTransmission]);
 
   const {
@@ -179,13 +182,14 @@ export default function SudaWidget() {
   }, [closeSettings, settingsOpen]);
 
   useEffect(() => {
-    if (!briefing || startupHandledRef.current) return;
+    const cached = getCachedBriefing();
+    if (!cached || startupHandledRef.current) return;
 
     startupHandledRef.current = true;
-    const tasks = briefingToLinearTasks(briefing);
+    const tasks = briefingToLinearTasks(cached);
     integrationMonitor.establishBaselineFromTasks(tasks);
     devLog("[SUDA] startup baseline established — no transmission");
-  }, [briefing, startupHandledRef]);
+  }, [startupHandledRef]);
 
   const refreshBriefing = useCallback(async () => {
     void unlockAudioPlayback();

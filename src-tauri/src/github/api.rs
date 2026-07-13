@@ -18,6 +18,7 @@ impl GitHubClient {
     pub fn new(token: &str, owner: &str) -> Result<Self, GitHubApiError> {
         let client = reqwest::Client::builder()
             .user_agent("SUDA")
+            .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|error| GitHubApiError {
                 http_status: 0,
@@ -44,7 +45,10 @@ impl GitHubClient {
                 }
             })?,
         );
-        headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.github+json"));
+        headers.insert(
+            ACCEPT,
+            HeaderValue::from_static("application/vnd.github+json"),
+        );
         headers.insert(
             "X-GitHub-Api-Version",
             HeaderValue::from_static("2022-11-28"),
